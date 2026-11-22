@@ -65,7 +65,7 @@ def review(req: ReviewRequest) -> ReviewResult:
     except LLMError as e:
         with _lock:
             _metrics["reviews_failed"] += 1
-        raise HTTPException(502, f"LLM provider error: {e}") from e
+        raise HTTPException(502, _friendly(e)) from e
     with _lock:
         _metrics["reviews_total"] += 1
         _metrics["comments_posted"] += len(result.comments)
