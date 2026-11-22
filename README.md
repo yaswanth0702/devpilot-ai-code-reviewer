@@ -130,8 +130,10 @@ name: DevPilot review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
 permissions:
-  contents: read
+  contents: write          # commit comments on direct pushes
   pull-requests: write
 jobs:
   review:
@@ -145,7 +147,16 @@ jobs:
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
 ```
 
-Open a PR and DevPilot posts one review: a summary, plus inline comments with suggested fixes.
+**When it runs:**
+
+| Event | What DevPilot does |
+|---|---|
+| PR opened, reopened, marked ready, or new commits pushed to it | Posts a review with inline comments on the changed lines |
+| Direct push to `main` (no PR) | Reviews the pushed commits and posts a **commit comment** listing issues with links to the lines |
+| Merging a PR into `main` | Skipped, because the code was already reviewed on the PR |
+| Draft PRs, PRs from forks | Skipped |
+
+On a PR, DevPilot posts one review: a summary, plus inline comments with suggested fixes.
 If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
 It always posts as `COMMENT` and never approves or blocks a PR. You can opt in with
 `fail-on-critical: "true"` to fail the check when a critical issue is found. This repo reviews
@@ -200,11 +211,11 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 28 passing | GitHub Action mode end to end against a fake GitHub API (inline comments, fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 31 passing | GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 28 passed
+cd agent && pytest -q          # 31 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
@@ -313,7 +324,7 @@ agent/                      Python agent service + CLI
     mock_provider.py        offline rule-based stand-in
     app.py                  FastAPI: /review, /health, /metrics
     cli.py                  `devpilot review`
-    github_action.py        GitHub Action mode: review the PR, post inline comments
+    github_action.py        GitHub Action mode: PR reviews and direct-push commit comments
   evals/                    seeded-bug benchmark + runner + results
   tests/
 gateway/                    Java 21 / Spring Boot 3.5 gateway

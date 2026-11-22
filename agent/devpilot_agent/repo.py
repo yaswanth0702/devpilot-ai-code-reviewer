@@ -89,6 +89,45 @@ class GitHubRepo:
         return self._changed
 
 
+class GitHubCommitRepo(GitHubRepo):
+    """A push (one or more commits): diff between `base` and `head`, files at `head`.
+
+    If `base` is missing (a new branch), only the head commit's own changes are reviewed."""
+
+    ZERO = "0" * 40
+
+    def __init__(self, owner: str, repo: str, base: str | None, head: str, token: str,
+                 client: httpx.Client | None = None):
+        self.owner, self.repo, self.pr_number = owner, repo, None
+        self._client = client or httpx.Client(timeout=30)
+        self._headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        self._cache = {}
+        self.head_sha = head
+        self.base_sha = None if not base or base == self.ZERO else base
+        self._diff = None
+        self._changed = None
+
+    def _compare_path(self) -> str:
+        if self.base_sha:
+            return f"/repos/{self.owner}/{self.repo}/compare/{self.base_sha}...{self.head_sha}"
+        return f"/repos/{self.owner}/{self.repo}/commits/{self.head_sha}"
+
+    def diff(self) -> str:
+        if self._diff is None:
+            self._diff = self._get(self._compare_path(), accept="application/vnd.github.diff").text
+        return self._diff
+
+    def list_files(self) -> list[str]:
+        if self._changed is None:
+            data = self._get(self._compare_path()).json()
+            self._changed = [f["filename"] for f in data.get("files", []) if f.get("status") != "removed"]
+        return self._changed
+
+
 class CodeSearchIndex:
     """BM25 index over files, chunked into line windows. Lets the agent find related code
     (callers, definitions) that isn't in the diff."""

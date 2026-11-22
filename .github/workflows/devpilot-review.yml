@@ -4,13 +4,15 @@ name: DevPilot review
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]   # direct pushes get a commit comment; merges from reviewed PRs are skipped
 
 permissions:
-  contents: read
+  contents: write        # needed to post commit comments on direct pushes
   pull-requests: write
 
 concurrency:
-  group: devpilot-${{ github.event.pull_request.number }}
+  group: devpilot-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true   # a new push cancels the review of the old commit
 
 jobs:

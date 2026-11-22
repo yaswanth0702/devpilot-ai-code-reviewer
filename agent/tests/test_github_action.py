@@ -19,6 +19,7 @@ def _fake_github():
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     mod.REVIEWS.clear()
+    mod.COMMIT_COMMENTS.clear()
     server = HTTPServer(("127.0.0.1", 0), mod.Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return mod, server
@@ -91,3 +92,45 @@ def test_falls_back_to_body_when_github_rejects_lines():
                                      "sha", result, "m")
     assert mode == "body" and len(calls) == 2
     assert calls[1]["comments"] == [] and "a.py:99" in calls[1]["body"]
+
+
+def _push_env(tmp_path, monkeypatch, server, payload):
+    monkeypatch.setattr(GitHubRepo, "API", f"http://127.0.0.1:{server.server_port}")
+    event = tmp_path / "push.json"
+    event.write_text(json.dumps(payload))
+    for k, v in {"GITHUB_EVENT_PATH": str(event), "GITHUB_EVENT_NAME": "push", "GITHUB_TOKEN": "t",
+                 "GITHUB_REPOSITORY": "yaswanth0702/demo", "DEVPILOT_PROVIDER": "mock"}.items():
+        monkeypatch.setenv(k, v)
+
+
+def test_direct_push_is_reviewed_as_commit_comment(tmp_path, monkeypatch):
+    mod, server = _fake_github()
+    try:
+        _push_env(tmp_path, monkeypatch, server, {"before": mod.BASE_SHA, "after": mod.HEAD_SHA, "ref": "refs/heads/main"})
+        assert github_action.main() == 0
+        [comment] = mod.COMMIT_COMMENTS
+        assert comment["sha"] == mod.HEAD_SHA
+        assert github_action.MARKER in comment["body"] and "SQL injection" in comment["body"]
+        assert f"/blob/{mod.HEAD_SHA}/app/users.py#L3" in comment["body"]
+    finally:
+        server.shutdown()
+
+
+def test_new_branch_push_reviews_head_commit(tmp_path, monkeypatch):
+    mod, server = _fake_github()
+    try:
+        _push_env(tmp_path, monkeypatch, server, {"before": "0" * 40, "after": mod.HEAD_SHA})
+        assert github_action.main() == 0
+        assert len(mod.COMMIT_COMMENTS) == 1
+    finally:
+        server.shutdown()
+
+
+def test_push_from_merged_pr_is_skipped(tmp_path, monkeypatch, capsys):
+    mod, server = _fake_github()
+    try:
+        _push_env(tmp_path, monkeypatch, server, {"before": mod.BASE_SHA, "after": mod.MERGED_SHA})
+        assert github_action.main() == 0
+        assert mod.COMMIT_COMMENTS == [] and "already reviewed" in capsys.readouterr().out
+    finally:
+        server.shutdown()

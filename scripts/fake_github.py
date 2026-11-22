@@ -28,7 +28,10 @@ DIFF = f"""diff --git a/{PATH} b/{PATH}
 +    return cur.fetchone()
 """
 HEAD_SHA = "3f2a9c1e0b7d4a5f8e6c2b1a0d9e8f7c6b5a4d3e"
+BASE_SHA = "1111111111111111111111111111111111111111"
+MERGED_SHA = "2222222222222222222222222222222222222222"  # a commit that came from a merged PR
 REVIEWS: list[dict] = []
+COMMIT_COMMENTS: list[dict] = []
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -45,6 +48,16 @@ class Handler(BaseHTTPRequestHandler):
         accept = self.headers.get("Accept", "")
         if p == "/_reviews":
             return self._send(200, REVIEWS)
+        if p == "/_commit_comments":
+            return self._send(200, COMMIT_COMMENTS)
+        # push mode: compare two commits, or a single commit
+        if p in (f"/repos/yaswanth0702/demo/compare/{BASE_SHA}...{HEAD_SHA}", f"/repos/yaswanth0702/demo/commits/{HEAD_SHA}"):
+            if "diff" in accept:
+                return self._send(200, DIFF, "text/plain")
+            return self._send(200, {"files": [{"filename": PATH, "status": "modified"}]})
+        if p.startswith("/repos/yaswanth0702/demo/commits/") and p.endswith("/pulls"):
+            merged = MERGED_SHA in p
+            return self._send(200, [{"number": 7, "merged_at": "2026-11-22T00:00:00Z"}] if merged else [])
         if p == "/repos/yaswanth0702/demo/pulls/42":
             if "diff" in accept:
                 return self._send(200, DIFF, "text/plain")
@@ -72,6 +85,9 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/repos/yaswanth0702/demo/pulls/42/reviews":
             REVIEWS.append(body)
             return self._send(200, {"id": len(REVIEWS)})
+        if self.path.startswith("/repos/yaswanth0702/demo/commits/") and self.path.endswith("/comments"):
+            COMMIT_COMMENTS.append({"sha": self.path.split("/")[5], **body})
+            return self._send(201, {"id": len(COMMIT_COMMENTS)})
         return self._send(404, {"message": "Not Found"})
 
     def log_message(self, fmt, *args):
