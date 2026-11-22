@@ -1,0 +1,28 @@
+# Copy this file to .github/workflows/devpilot-review.yml in any repository.
+# Then add your Gemini key: Settings -> Secrets and variables -> Actions -> New repository secret
+#   Name: GEMINI_API_KEY
+name: DevPilot review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: devpilot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true   # a new push cancels the review of the old commit
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: yaswanth0702/devpilot-ai-code-reviewer@main
+        with:
+          provider: gemini
+          model: gemini-3.1-flash-lite
+          reasoning-effort: minimal
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}

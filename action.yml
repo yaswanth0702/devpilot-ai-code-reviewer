@@ -1,0 +1,59 @@
+name: DevPilot AI Code Review
+description: An LLM agent that reviews pull requests and posts inline comments with suggested fixes.
+author: Yaswanth Podapati
+branding:
+  icon: eye
+  color: purple
+
+inputs:
+  provider:
+    description: "LLM provider: gemini, anthropic or openai"
+    default: gemini
+  model:
+    description: "Model name (optional). Defaults: gemini-3.8-flash / claude-sonnet-5-5 / gpt-4.1"
+    default: ""
+  reasoning-effort:
+    description: "Reasoning effort for OpenAI-compatible providers (minimal, low, medium, high)"
+    default: ""
+  gemini-api-key:
+    description: Gemini API key (store it as a repository secret)
+    default: ""
+  anthropic-api-key:
+    description: Anthropic API key (store it as a repository secret)
+    default: ""
+  openai-api-key:
+    description: OpenAI API key (store it as a repository secret)
+    default: ""
+  github-token:
+    description: Token used to read the PR and post the review
+    default: ${{ github.token }}
+  min-confidence:
+    description: Drop comments below this confidence (0-1)
+    default: "0.5"
+  fail-on-critical:
+    description: Fail the check when a critical issue is found
+    default: "false"
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install DevPilot
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}/agent"
+    - name: Review pull request
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        DEVPILOT_PROVIDER: ${{ inputs.provider }}
+        DEVPILOT_MODEL: ${{ inputs.model }}
+        DEVPILOT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
+        DEVPILOT_MIN_CONFIDENCE: ${{ inputs.min-confidence }}
+        DEVPILOT_FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
+        DEVPILOT_TIMEOUT: "180"
+        GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
+        ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
+        OPENAI_API_KEY: ${{ inputs.openai-api-key }}
+      run: python -m devpilot_agent.github_action

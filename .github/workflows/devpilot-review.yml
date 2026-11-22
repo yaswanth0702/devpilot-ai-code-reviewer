@@ -1,0 +1,27 @@
+# DevPilot reviews pull requests to this repository. Needs the GEMINI_API_KEY repository secret.
+name: DevPilot review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: devpilot-${{ github.event.pull_request.number }}
+  cancel-in-progress: true   # a new push cancels the review of the old commit
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./   # this repo reviews its own PRs with the local action
+        with:
+          provider: gemini
+          model: gemini-3.1-flash-lite
+          reasoning-effort: minimal
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}

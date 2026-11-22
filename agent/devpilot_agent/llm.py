@@ -102,7 +102,7 @@ def _retry_after(r: httpx.Response) -> float | None:
 
 class AnthropicClient:
     def __init__(self, model: str | None = None, api_key: str | None = None, max_tokens: int = 4096):
-        self.model = model or os.getenv("DEVPILOT_MODEL", "claude-sonnet-5-5")
+        self.model = model or os.getenv("DEVPILOT_MODEL") or "claude-sonnet-5-5"
         self.api_key = api_key or os.environ.get("ANTHROPIC_API_KEY") or ""
         if not self.api_key:
             raise LLMError("ANTHROPIC_API_KEY is not set")

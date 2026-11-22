@@ -10,7 +10,8 @@ It runs two ways:
 | Mode | How you use it | Needs GitHub? |
 |---|---|---|
 | **Local mode** | `devpilot review` in any git repo; results print in your terminal. It can also run as a pre-push hook. | No |
-| **GitHub mode** | Open a pull request; DevPilot posts inline review comments on it automatically. | Yes |
+| **GitHub Action** | Add one workflow file; GitHub runs DevPilot on every PR and it posts inline comments. | Yes, nothing to host |
+| **Self-hosted server** | Spring Boot gateway receives webhooks, queues reviews and posts comments. | Yes |
 
 Every comment passes through a **verifier guardrail** before you see it. The guardrail removes
 hallucinated files, comments on lines the PR didn't touch, low-confidence guesses, duplicates and nits.
@@ -112,7 +113,49 @@ Example output: see [docs/local-mode-output.txt](docs/local-mode-output.txt).
 
 ---
 
-## GitHub mode
+## Run it on GitHub (GitHub Action), the easiest way
+
+DevPilot runs on GitHub's own servers: every pull request gets reviewed automatically, with inline
+comments on the changed lines. There's no server to host and nothing to install.
+
+**Set up any of your repositories in two steps:**
+
+1. Add your API key as a secret in the repo you want reviewed: **Settings → Secrets and variables →
+   Actions → New repository secret**, name `GEMINI_API_KEY`.
+2. Copy [`examples/devpilot-review.yml`](examples/devpilot-review.yml) into that repo as
+   `.github/workflows/devpilot-review.yml`:
+
+```yaml
+name: DevPilot review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: yaswanth0702/devpilot-ai-code-reviewer@main
+        with:
+          provider: gemini                 # or anthropic / openai
+          model: gemini-3.1-flash-lite
+          reasoning-effort: minimal
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+```
+
+Open a PR and DevPilot posts one review: a summary, plus inline comments with suggested fixes.
+If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
+It always posts as `COMMENT` and never approves or blocks a PR. You can opt in with
+`fail-on-critical: "true"` to fail the check when a critical issue is found. This repo reviews
+its own PRs with the same action ([workflow](.github/workflows/devpilot-review.yml)).
+
+Inputs: `provider`, `model`, `reasoning-effort`, `gemini-api-key` / `anthropic-api-key` /
+`openai-api-key`, `min-confidence` (default `0.5`) and `fail-on-critical` (default `false`).
+PRs from forks don't receive repository secrets, so they are not reviewed.
+
+## GitHub mode (self-hosted server)
 
 ### 1. Run the services
 
@@ -157,11 +200,11 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 24 passing | OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 28 passing | GitHub Action mode end to end against a fake GitHub API (inline comments, fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 24 passed
+cd agent && pytest -q          # 28 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
@@ -270,12 +313,15 @@ agent/                      Python agent service + CLI
     mock_provider.py        offline rule-based stand-in
     app.py                  FastAPI: /review, /health, /metrics
     cli.py                  `devpilot review`
+    github_action.py        GitHub Action mode: review the PR, post inline comments
   evals/                    seeded-bug benchmark + runner + results
   tests/
 gateway/                    Java 21 / Spring Boot 3.5 gateway
   webhook/                  HMAC verification, webhook controller
   review/                   job entity, repository, worker, read API
   client/                   agent + GitHub REST clients
+action.yml                  GitHub Action definition
+examples/                   workflow to copy into your repos
 scripts/                    e2e demo, fake GitHub API, pre-push hook installer
 docs/                       recorded outputs
 .github/workflows/ci.yml    tests + offline eval on every push
