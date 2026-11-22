@@ -227,8 +227,8 @@ N+1 query it investigated further (7–8 tool calls). The whole run used about 4
 | Clean PR: parameterized SQL (Python) | ⚠️ 1 false positive | 3 |
 | Clean PR: try-with-resources (Java) | ⚠️ 1 false positive | 3 |
 
-The full report, including every comment the agent made, is in
-[`agent/evals/results/gemini.md`](agent/evals/results/gemini.md) and
+The summary report is [`agent/evals/results/gemini.md`](agent/evals/results/gemini.md); every
+comment the agent made, with its line, severity and suggested fix, is in
 [`gemini.json`](agent/evals/results/gemini.json).
 
 These numbers come from a single run on a small benchmark, so treat them as indicative. To
