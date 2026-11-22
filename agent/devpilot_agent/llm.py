@@ -7,11 +7,15 @@ Each provider adapter converts to its own wire format.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Protocol
 
 import httpx
+
+log = logging.getLogger("devpilot.llm")
 
 
 @dataclass
@@ -58,22 +62,42 @@ class LLMError(RuntimeError):
     pass
 
 
-def _post_with_retry(client: httpx.Client, url: str, headers: dict, body: dict, retries: int = 3) -> dict:
-    last: Exception | None = None
-    for attempt in range(retries):
+def _post_with_retry(client: httpx.Client, url: str, headers: dict, body: dict, retries: int = 4) -> dict:
+    """POST with retries on rate limits (429), overload (5xx) and network errors.
+
+    Honors Retry-After, and logs every wait so slow runs are explainable."""
+    last: str = ""
+    for attempt in range(1, retries + 1):
+        started = time.monotonic()
         try:
             r = client.post(url, headers=headers, json=body)
-            if r.status_code in (429, 500, 502, 503, 529) and attempt < retries - 1:
-                import time
-
+        except httpx.TransportError as e:
+            last = f"{type(e).__name__} after {time.monotonic() - started:.0f}s"
+            log.warning("LLM request attempt %d/%d failed: %s", attempt, retries, last)
+            if attempt < retries:
                 time.sleep(2 ** attempt)
+            continue
+        elapsed = time.monotonic() - started
+        if r.status_code in (429, 500, 502, 503, 529):
+            last = f"HTTP {r.status_code}: {r.text[:200]}"
+            if attempt < retries:
+                wait = _retry_after(r) or 2 ** attempt * (5 if r.status_code == 429 else 1)
+                log.warning("LLM %s (attempt %d/%d), waiting %.0fs%s", f"HTTP {r.status_code}", attempt, retries, wait,
+                            " - rate limited; free tiers allow only a few requests per minute" if r.status_code == 429 else "")
+                time.sleep(wait)
                 continue
-            if r.status_code >= 400:
-                raise LLMError(f"{r.status_code}: {r.text[:500]}")
-            return r.json()
-        except httpx.TransportError as e:  # network blip -> retry
-            last = e
+        if r.status_code >= 400:
+            raise LLMError(f"HTTP {r.status_code}: {r.text[:500]}")
+        log.info("LLM call ok in %.1fs", elapsed)
+        return r.json()
     raise LLMError(f"request failed after {retries} attempts: {last}")
+
+
+def _retry_after(r: httpx.Response) -> float | None:
+    try:
+        return min(float(r.headers.get("retry-after", "")), 120.0)
+    except ValueError:
+        return None
 
 
 class AnthropicClient:
@@ -83,7 +107,7 @@ class AnthropicClient:
         if not self.api_key:
             raise LLMError("ANTHROPIC_API_KEY is not set")
         self.max_tokens = max_tokens
-        self._http = httpx.Client(timeout=120)
+        self._http = httpx.Client(timeout=float(os.getenv("DEVPILOT_TIMEOUT", "120")))
 
     def complete(self, system: str, messages: list[dict], tools: list[ToolSpec]) -> LLMResponse:
         body = {
@@ -123,13 +147,16 @@ class OpenAIClient:
         base_url: str | None = None,
         default_model: str = "gpt-4.1",
         http: httpx.Client | None = None,
+        reasoning_effort: str | None = None,
     ):
+        # Lower thinking = much faster agent steps. "" disables the parameter.
+        self.reasoning_effort = os.getenv("DEVPILOT_REASONING_EFFORT", reasoning_effort or "") or None
         self.model = model or os.getenv("DEVPILOT_MODEL") or default_model
         self.api_key = api_key or os.environ.get(key_env) or ""
         if not self.api_key:
             raise LLMError(f"{key_env} is not set")
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
-        self._http = http or httpx.Client(timeout=120)
+        self._http = http or httpx.Client(timeout=float(os.getenv("DEVPILOT_TIMEOUT", "120")))
 
     @staticmethod
     def _to_openai(system: str, messages: list[dict]) -> list[dict]:
@@ -166,6 +193,8 @@ class OpenAIClient:
                 for t in tools
             ],
         }
+        if self.reasoning_effort:
+            body["reasoning_effort"] = self.reasoning_effort
         data = _post_with_retry(
             self._http,
             f"{self.base_url}/chat/completions",
@@ -219,6 +248,7 @@ def make_client(provider: str, model: str | None = None) -> LLMClient:
             key_env="GEMINI_API_KEY",
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
             default_model="gemini-3.8-flash",
+            reasoning_effort="low",
         )
     if provider == "mock":
         from .mock_provider import mock_reviewer

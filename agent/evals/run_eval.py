@@ -53,8 +53,9 @@ def score_case(case: dict, comments: list) -> dict:
 def run(provider: str, model: str | None, repeats: int = 1) -> dict:
     agent = ReviewAgent(make_client(provider, model))
     rows = []
-    for case in CASES:
+    for n, case in enumerate(CASES, 1):
         for _ in range(repeats):
+            print(f"[{n}/{len(CASES)}] {case['id']} ...", flush=True)
             diff = build_diff(case["path"], case["before"], case["after"])
             repo = InMemoryRepo(diff, {case["path"]: case["after"]})
             t0 = time.monotonic()
@@ -121,7 +122,13 @@ def main() -> None:
     p.add_argument("--provider", default="mock", choices=["mock", "anthropic", "openai", "gemini"])
     p.add_argument("--model")
     p.add_argument("--repeats", type=int, default=1)
+    p.add_argument("-q", "--quiet", action="store_true", help="hide per-request progress")
     args = p.parse_args()
+    import logging
+
+    logging.basicConfig(level=logging.WARNING if args.quiet else logging.INFO, format="    %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("devpilot.agent").setLevel(logging.WARNING)
     rep = run(args.provider, args.model, args.repeats)
     RESULTS_DIR.mkdir(exist_ok=True)
     stem = f"{args.provider}{'-' + args.model if args.model else ''}"

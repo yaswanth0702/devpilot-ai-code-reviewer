@@ -57,3 +57,27 @@ def test_missing_key_is_clear_error(monkeypatch):
         assert "GEMINI_API_KEY is not set" in str(e)
     else:
         raise AssertionError("expected error")
+
+
+def test_rate_limit_is_retried_with_retry_after(monkeypatch, caplog):
+    import devpilot_agent.llm as llm
+
+    sleeps = []
+    monkeypatch.setattr(llm.time, "sleep", lambda s: sleeps.append(s))
+    calls = {"n": 0}
+
+    def handler(request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return httpx.Response(429, headers={"retry-after": "7"}, json={"error": "quota"})
+        body = json.loads(request.content)
+        assert body["reasoning_effort"] == "low"
+        return httpx.Response(200, json=_tool_call("c", "submit_review", {"summary": "s", "comments": []}))
+
+    monkeypatch.delenv("DEVPILOT_REASONING_EFFORT", raising=False)
+    client = OpenAIClient(api_key="k", base_url="https://x/v1", reasoning_effort="low",
+                          http=httpx.Client(transport=httpx.MockTransport(handler)))
+    with caplog.at_level("WARNING"):
+        resp = client.complete("sys", [{"role": "user", "content": [{"type": "text", "text": "hi"}]}], [])
+    assert resp.tool_calls[0].name == "submit_review"
+    assert sleeps == [7.0] and "rate limited" in caplog.text
