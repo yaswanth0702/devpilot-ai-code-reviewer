@@ -81,6 +81,9 @@ changing: prompts, tools and model providers. Either one can be deployed or scal
 
 ## Quick start: local mode (no GitHub needed)
 
+**One step:** `bash scripts/setup_and_run.sh` installs everything, runs the tests, asks for your
+API key (hidden, never saved) and runs the benchmark. To do it by hand instead:
+
 ```bash
 cd agent
 pip install -e ".[dev]"
