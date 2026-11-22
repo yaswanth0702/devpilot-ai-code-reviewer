@@ -46,3 +46,13 @@ def sample_diff():
 @pytest.fixture
 def sample_files():
     return dict(SAMPLE_FILES)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_env(monkeypatch):
+    """Tests must not depend on the developer's DEVPILOT_* / API-key settings."""
+    import os
+
+    for name in list(os.environ):
+        if name.startswith("DEVPILOT_") or name in ("OPENAI_BASE_URL",):
+            monkeypatch.delenv(name, raising=False)
