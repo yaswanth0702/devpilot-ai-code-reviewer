@@ -1,0 +1,30 @@
+spring:
+  application:
+    name: devpilot-gateway
+  datasource:
+    url: ${DATABASE_URL:jdbc:h2:mem:devpilot;DB_CLOSE_DELAY=-1}
+    username: ${DATABASE_USER:sa}
+    password: ${DATABASE_PASSWORD:}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+server:
+  port: ${PORT:8080}
+
+devpilot:
+  webhook-secret: ${GITHUB_WEBHOOK_SECRET:change-me}
+  github-token: ${GITHUB_TOKEN:}
+  github-api-url: ${GITHUB_API_URL:https://api.github.com}
+  agent-url: ${AGENT_URL:http://localhost:8000}
+  max-attempts: 3
+  retry-backoff-seconds: 10
+  agent-timeout-seconds: 180
+  poll-interval-ms: 2000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics

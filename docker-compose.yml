@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: devpilot
+      POSTGRES_USER: devpilot
+      POSTGRES_PASSWORD: devpilot
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devpilot"]
+      interval: 5s
+      retries: 10
+
+  agent:
+    build: ./agent
+    environment:
+      DEVPILOT_PROVIDER: ${DEVPILOT_PROVIDER:-anthropic}
+      DEVPILOT_MODEL: ${DEVPILOT_MODEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+    ports:
+      - "8000:8000"
+
+  gateway:
+    build: ./gateway
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agent:
+        condition: service_started
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/devpilot
+      DATABASE_USER: devpilot
+      DATABASE_PASSWORD: devpilot
+      AGENT_URL: http://agent:8000
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:

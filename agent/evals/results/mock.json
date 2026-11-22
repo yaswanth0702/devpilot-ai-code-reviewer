@@ -1,0 +1,217 @@
+{
+  "provider": "mock",
+  "model": "mock",
+  "run_at": "2026-11-22T01:20:09+00:00",
+  "cases": 14,
+  "repeats": 1,
+  "precision": 1.0,
+  "recall": 0.273,
+  "f1": 0.429,
+  "category_accuracy": 1.0,
+  "clean_cases_with_false_positives": 0,
+  "clean_cases": 3,
+  "comments_filtered_by_verifier": 0,
+  "median_seconds": 0.0,
+  "avg_tool_calls": 3,
+  "total_tokens": 0,
+  "rows": [
+    {
+      "id": "java-sql-injection",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-string-equality",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-resource-leak",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-race-condition",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-optional-get",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-swallowed-exception",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/PaymentClient.java",
+          "line": 11,
+          "severity": "major",
+          "category": "error_handling",
+          "body": "Empty catch block silently ignores the exception.",
+          "suggestion": "Log the exception with context or rethrow a wrapped exception.",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "id": "java-off-by-one",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "py-hardcoded-secret",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/config.py",
+          "line": 4,
+          "severity": "critical",
+          "category": "security",
+          "body": "Hard-coded credential committed to source control.",
+          "suggestion": "Load it from an environment variable or a secrets manager and rotate the leaked value.",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "id": "py-mutable-default",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "py-bare-except",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/sync.py",
+          "line": 7,
+          "severity": "major",
+          "category": "error_handling",
+          "body": "Broad `except` swallows every error, hiding real failures and making debugging very hard.",
+          "suggestion": "Catch the specific exception you expect and log or re-raise the rest.",
+          "confidence": 0.8
+        }
+      ]
+    },
+    {
+      "id": "py-n-plus-one",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "clean-java-refactor",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "clean-py-param-query",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "clean-java-try-with-resources",
+      "tp": 0,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 0.0,
+      "tool_calls": 3,
+      "tokens": 0,
+      "filtered": 0,
+      "comments": []
+    }
+  ]
+}

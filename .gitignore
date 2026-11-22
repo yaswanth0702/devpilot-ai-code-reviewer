@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+gateway/target/
+.idea/
+.vscode/
+*.iml
+.DS_Store

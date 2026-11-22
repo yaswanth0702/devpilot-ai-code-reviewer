@@ -1,0 +1,18 @@
+$ devpilot review ./shop-api --provider mock
+DevPilot review
+============================================================
+[mock provider] Rule-based stand-in reviewed 1 file(s) and found 3 candidate issue(s). Use a real LLM provider for actual reviews.
+
+[CRITICAL] src/orders.py:4  (security, confidence 0.80)
+    Hard-coded credential committed to source control.
+    fix: Load it from an environment variable or a secrets manager and rotate the leaked value.
+
+[CRITICAL] src/orders.py:10  (security, confidence 0.80)
+    SQL built by string concatenation with runtime values: this is open to SQL injection.
+    fix: Use a parameterized query (PreparedStatement / bound parameters).
+
+[MAJOR] src/orders.py:12  (error_handling, confidence 0.80)
+    Broad `except` swallows every error, hiding real failures and making debugging very hard.
+    fix: Catch the specific exception you expect and log or re-raise the rest.
+
+steps=3 tool_calls=3 kept=3 filtered_by_verifier=0 tokens=0+0

@@ -1,0 +1,47 @@
+==> building gateway
+==> starting fake GitHub on :9000
+==> starting agent on :8000 (provider=mock)
+==> starting gateway on :8080
+==> sending signed pull_request webhook
+{"jobId":1,"status":"queued"}
+==> waiting for the review job
+
+==> job record (gateway /api/reviews)
+[
+    {
+        "id": 1,
+        "deliveryId": "demo-1795310248",
+        "owner": "yaswanth0702",
+        "repo": "demo",
+        "prNumber": 42,
+        "headSha": "3f2a9c1e0b7d4a5f8e6c2b1a0d9e8f7c6b5a4d3e",
+        "status": "DONE",
+        "attempts": 1,
+        "nextAttemptAt": "2026-11-22T01:17:28.893508Z",
+        "createdAt": "2026-11-22T01:17:28.893509Z",
+        "finishedAt": "2026-11-22T01:17:30.866044Z",
+        "commentsPosted": 1,
+        "commentsFiltered": 0,
+        "durationMs": 171,
+        "lastError": null
+    }
+]
+
+==> review DevPilot posted to the (fake) GitHub PR
+[
+    {
+        "commit_id": "3f2a9c1e0b7d4a5f8e6c2b1a0d9e8f7c6b5a4d3e",
+        "event": "COMMENT",
+        "body": "### \ud83e\udd16 DevPilot review\n\n[mock provider] Rule-based stand-in reviewed 1 file(s) and found 1 candidate issue(s). Use a real LLM provider for actual reviews.\n\n<sub>1 comment(s) posted \u00b7 0 filtered by verifier \u00b7 3 tool calls</sub>",
+        "comments": [
+            {
+                "side": "RIGHT",
+                "body": "**CRITICAL** \u00b7 security\n\nSQL built by string concatenation with runtime values: this is open to SQL injection.\n\n**Suggested fix:** Use a parameterized query (PreparedStatement / bound parameters).\n\n<sub>DevPilot \u00b7 confidence 0.80</sub>",
+                "line": 3,
+                "path": "app/users.py"
+            }
+        ]
+    }
+]
+
+logs in <temp dir>
