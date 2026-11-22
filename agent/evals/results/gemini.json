@@ -1,0 +1,317 @@
+{
+  "provider": "gemini",
+  "model": "gemini-3.1-flash-lite",
+  "run_at": "2026-11-22T16:26:54+00:00",
+  "cases": 14,
+  "repeats": 1,
+  "precision": 0.769,
+  "recall": 0.909,
+  "f1": 0.833,
+  "category_accuracy": 0.8,
+  "clean_cases_with_false_positives": 3,
+  "clean_cases": 3,
+  "comments_filtered_by_verifier": 0,
+  "median_seconds": 54.445,
+  "avg_tool_calls": 3,
+  "total_tokens": 46266,
+  "rows": [
+    {
+      "id": "java-sql-injection",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 4.75,
+      "tool_calls": 2,
+      "tokens": 2179,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/UserDao.java",
+          "line": 15,
+          "severity": "critical",
+          "category": "security",
+          "body": "Using string concatenation to build a SQL query is a critical security vulnerability. It allows SQL injection attacks if the `email` input is not properly sanitized. You should use a `PreparedStatement` with parameterized queries instead.",
+          "suggestion": "PreparedStatement stmt = conn.prepareStatement(\"SELECT * FROM users WHERE email = ?\"); stmt.setString(1, email); return stmt.executeQuery();",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "java-string-equality",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 112.37,
+      "tool_calls": 2,
+      "tokens": 2047,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/RoleCheck.java",
+          "line": 5,
+          "severity": "critical",
+          "category": "bug",
+          "body": "String comparison using `==` checks for reference equality rather than value equality in Java. This will fail if the string returned by `u.getRole()` is not interned or if it's constructed dynamically. It should be replaced with `u.getRole().equals(\"ADMIN\")` or better yet `\"ADMIN\".equals(u.getRole())` to handle potential nulls.",
+          "suggestion": "\"ADMIN\".equals(u.getRole())",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "java-resource-leak",
+      "tp": 0,
+      "fp": 0,
+      "fn": 1,
+      "category_correct": 0,
+      "seconds": 1.13,
+      "tool_calls": 1,
+      "tokens": 1051,
+      "filtered": 0,
+      "comments": []
+    },
+    {
+      "id": "java-race-condition",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 124.93,
+      "tool_calls": 2,
+      "tokens": 2068,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/RequestCounter.java",
+          "line": 11,
+          "severity": "major",
+          "category": "concurrency",
+          "body": "`RequestCounter` is a `@Component` (singleton by default) and `increment()` is called by multiple threads. `count++` is not atomic; this will lead to lost updates and inaccurate counts. Use `AtomicInteger` instead.",
+          "suggestion": "Use AtomicInteger:\nprivate AtomicInteger count = new AtomicInteger(0);\n...\nreturn count.incrementAndGet();",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "java-optional-get",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 96.15,
+      "tool_calls": 7,
+      "tokens": 8351,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/OrderService.java",
+          "line": 9,
+          "severity": "major",
+          "category": "bug",
+          "body": "The use of `.get()` on an `Optional` returned by `repo.findById(orderId)` will throw a `NoSuchElementException` if the order does not exist. This should be handled gracefully, either by throwing a domain-specific exception (e.g., `OrderNotFoundException`) or returning an appropriate value/Optional.",
+          "suggestion": "repo.findById(orderId).orElseThrow(() -> new OrderNotFoundException(orderId));",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "java-swallowed-exception",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 65.03,
+      "tool_calls": 5,
+      "tokens": 5739,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/PaymentClient.java",
+          "line": 12,
+          "severity": "critical",
+          "category": "bug",
+          "body": "The `charge` method swallows all exceptions and always returns `true`, regardless of whether the payment actually succeeded. This makes it impossible for the caller to know if the payment failed, which is dangerous for financial operations. If `gateway.charge` throws an exception (e.g., connection error, insufficient funds), the system will treat the transaction as successful. It should either rethrow the exception or return `false` on failure.",
+          "suggestion": "Return `false` in the catch block, or better, log the error and rethrow it so the caller can handle the failure.",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "java-off-by-one",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 175.51,
+      "tool_calls": 2,
+      "tokens": 2337,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/Paginator.java",
+          "line": 8,
+          "severity": "critical",
+          "category": "bug",
+          "body": "The loop logic contains several critical issues:\n1. `i <= page * size + size` will iterate one element too many (it includes the element at index `page * size + size`). If `page=0` and `size=10`, it iterates from 0 to 10 (11 elements).\n2. It does not check if `i` is within the bounds of the `items` list, which will throw `IndexOutOfBoundsException` if the page requested exceeds the available data.\n3. It does not handle cases where `page` or `size` might be negative.\n\nRecommendation: Use `List.subList` with proper boundary checks.",
+          "suggestion": "int from = page * size;\nint to = Math.min(from + size, items.size());\nif (from >= items.size() || from < 0) return Collections.emptyList();\nreturn items.subList(from, to);",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "py-hardcoded-secret",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 1.54,
+      "tool_calls": 2,
+      "tokens": 1840,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/config.py",
+          "line": 4,
+          "severity": "major",
+          "category": "security",
+          "body": "Hardcoding secrets, even placeholders or test keys, in source code is a security risk. It can lead to accidental commits of actual production keys later if developers follow this pattern, or leakage of sensitive API keys through version control. Use environment variables instead.",
+          "suggestion": "STRIPE_API_KEY = os.getenv(\"STRIPE_API_KEY\")",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "py-mutable-default",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 46.63,
+      "tool_calls": 1,
+      "tokens": 995,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/cart.py",
+          "line": 5,
+          "severity": "major",
+          "category": "bug",
+          "body": "Using a mutable object (like a list) as a default argument value in Python is a classic bug. The `items` list is created once when the function is defined and shared across all subsequent calls that do not provide an explicit list. This leads to unexpected behavior where items persist between calls. Use `None` as the default value instead.",
+          "suggestion": "def add_item(item, items=None):\n    if items is None:\n        items = []\n    items.append(item)\n    return items",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "py-bare-except",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 71.83,
+      "tool_calls": 2,
+      "tokens": 1978,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/sync.py",
+          "line": 7,
+          "severity": "major",
+          "category": "error_handling",
+          "body": "The `try...except: pass` block swallows all exceptions, causing `fetch` to return `None` implicitly if an error occurs. This masks potential network issues, invalid JSON responses, or HTTP errors, making debugging difficult for callers who might expect a specific return type or an exception to be raised. It is better to re-raise the exception or handle specific expected errors.",
+          "suggestion": "Remove the bare except or log the error and re-raise. Alternatively, use requests.raise_for_status() and handle specific exceptions like requests.RequestException.",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "py-n-plus-one",
+      "tp": 1,
+      "fp": 0,
+      "fn": 0,
+      "category_correct": 1,
+      "seconds": 29.1,
+      "tool_calls": 8,
+      "tokens": 9045,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/reports.py",
+          "line": 8,
+          "severity": "major",
+          "category": "performance",
+          "body": "The `revenue_by_customer` function executes a database query inside a loop (N+1 query problem). As the number of customers grows, this will cause significant performance degradation. It should be refactored to use a single SQL `GROUP BY` aggregation query.",
+          "suggestion": "Use `session.query(Customer.name, func.sum(Order.amount)).join(Order).group_by(Customer.id).all()` instead of iterating through customers.",
+          "confidence": 1.0
+        }
+      ]
+    },
+    {
+      "id": "clean-java-refactor",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 14.54,
+      "tool_calls": 2,
+      "tokens": 2332,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/PriceFormatter.java",
+          "line": 11,
+          "severity": "minor",
+          "category": "concurrency",
+          "body": "The use of `synchronized(USD)` on a static `NumberFormat` instance is a coarse-grained lock that will cause unnecessary contention in a multi-threaded application. `NumberFormat` is not thread-safe, but it is better to use `ThreadLocal<NumberFormat>` or create a new instance per call if performance is not critical, rather than synchronizing on a shared static instance.\n\nAlternatively, since `NumberFormat` is not thread-safe, the standard approach is to avoid sharing it across threads. Synchronizing on it is technically correct for safety, but creates a performance bottleneck.",
+          "suggestion": null,
+          "confidence": 0.9
+        }
+      ]
+    },
+    {
+      "id": "clean-py-param-query",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 7.78,
+      "tool_calls": 3,
+      "tokens": 3035,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "app/users.py",
+          "line": 4,
+          "severity": "minor",
+          "category": "maintainability",
+          "body": "The function `get_user` returns the result of `cur.fetchone()`, which is typically a tuple or a row object from the database driver. If no user is found, this will return `None`.\n\nIf the calling code expects to handle `None` when a user is not found, this is fine. However, it's worth verifying that all callers of `get_user` expect this return type, as the previous implementation *always* returned `None`, which might have been used to signal \"no user found\" or \"not implemented\". Now it can return a row object. If existing code relies on `get_user` returning `None` to indicate a specific error or logic path, this change might break that.\n\nAdditionally, consider if you want to return a dictionary or a structured object instead of a database-specific row/tuple for better decoupling.",
+          "suggestion": null,
+          "confidence": 0.6
+        }
+      ]
+    },
+    {
+      "id": "clean-java-try-with-resources",
+      "tp": 0,
+      "fp": 1,
+      "fn": 0,
+      "category_correct": 0,
+      "seconds": 62.26,
+      "tool_calls": 3,
+      "tokens": 3269,
+      "filtered": 0,
+      "comments": [
+        {
+          "path": "src/main/java/app/FileStats.java",
+          "line": 10,
+          "severity": "minor",
+          "category": "error_handling",
+          "body": "While `Files.lines` is correct for small files, it doesn't explicitly handle character encoding. If the file is not in UTF-8 (which is the default `Files.lines` uses), this might fail or produce incorrect results for files with different encodings. Consider allowing a Charset parameter or explicitly using StandardCharsets.UTF_8 if you intend to support only UTF-8. Additionally, `Files.lines` can throw `UncheckedIOException` if an I/O error occurs during stream consumption, which is not being caught here.",
+          "suggestion": null,
+          "confidence": 0.7
+        }
+      ]
+    }
+  ]
+}
