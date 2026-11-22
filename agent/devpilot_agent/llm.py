@@ -26,6 +26,9 @@ class ToolCall:
     id: str
     name: str
     input: dict[str, Any]
+    # provider-specific data that must be echoed back on the next turn
+    # (e.g. Gemini 3 thought signatures in extra_content.google.thought_signature)
+    extra: dict[str, Any] | None = None
 
 
 @dataclass
@@ -40,7 +43,10 @@ class LLMResponse:
         if self.text:
             content.append({"type": "text", "text": self.text})
         for c in self.tool_calls:
-            content.append({"type": "tool_use", "id": c.id, "name": c.name, "input": c.input})
+            block = {"type": "tool_use", "id": c.id, "name": c.name, "input": c.input}
+            if c.extra:
+                block["extra_content"] = c.extra
+            content.append(block)
         return {"role": "assistant", "content": content}
 
 
@@ -106,13 +112,24 @@ class AnthropicClient:
 
 
 class OpenAIClient:
-    def __init__(self, model: str | None = None, api_key: str | None = None):
-        self.model = model or os.getenv("DEVPILOT_MODEL", "gpt-4.1")
-        self.api_key = api_key or os.environ.get("OPENAI_API_KEY") or ""
+    """OpenAI Chat Completions format. Also used for Gemini, Ollama and vLLM, which expose
+    OpenAI-compatible endpoints."""
+
+    def __init__(
+        self,
+        model: str | None = None,
+        api_key: str | None = None,
+        key_env: str = "OPENAI_API_KEY",
+        base_url: str | None = None,
+        default_model: str = "gpt-4.1",
+        http: httpx.Client | None = None,
+    ):
+        self.model = model or os.getenv("DEVPILOT_MODEL") or default_model
+        self.api_key = api_key or os.environ.get(key_env) or ""
         if not self.api_key:
-            raise LLMError("OPENAI_API_KEY is not set")
-        self.base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")  # also works for Ollama/vLLM
-        self._http = httpx.Client(timeout=120)
+            raise LLMError(f"{key_env} is not set")
+        self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "https://api.openai.com/v1").rstrip("/")
+        self._http = http or httpx.Client(timeout=120)
 
     @staticmethod
     def _to_openai(system: str, messages: list[dict]) -> list[dict]:
@@ -120,11 +137,14 @@ class OpenAIClient:
         for m in messages:
             texts = [b["text"] for b in m["content"] if b["type"] == "text"]
             if m["role"] == "assistant":
-                calls = [
-                    {"id": b["id"], "type": "function", "function": {"name": b["name"], "arguments": json.dumps(b["input"])}}
-                    for b in m["content"]
-                    if b["type"] == "tool_use"
-                ]
+                calls = []
+                for b in m["content"]:
+                    if b["type"] != "tool_use":
+                        continue
+                    call = {"id": b["id"], "type": "function", "function": {"name": b["name"], "arguments": json.dumps(b["input"])}}
+                    if b.get("extra_content"):
+                        call["extra_content"] = b["extra_content"]
+                    calls.append(call)
                 msg: dict = {"role": "assistant", "content": "\n".join(texts) or None}
                 if calls:
                     msg["tool_calls"] = calls
@@ -159,7 +179,12 @@ class OpenAIClient:
             output_tokens=data.get("usage", {}).get("completion_tokens", 0),
         )
         for c in choice.get("tool_calls") or []:
-            resp.tool_calls.append(ToolCall(c["id"], c["function"]["name"], json.loads(c["function"]["arguments"] or "{}")))
+            resp.tool_calls.append(ToolCall(
+                c.get("id") or f"call_{len(resp.tool_calls)}",
+                c["function"]["name"],
+                json.loads(c["function"]["arguments"] or "{}"),
+                extra=c.get("extra_content"),
+            ))
         return resp
 
 
@@ -188,6 +213,13 @@ def make_client(provider: str, model: str | None = None) -> LLMClient:
         return AnthropicClient(model)
     if provider == "openai":
         return OpenAIClient(model)
+    if provider == "gemini":
+        return OpenAIClient(
+            model,
+            key_env="GEMINI_API_KEY",
+            base_url="https://generativelanguage.googleapis.com/v1beta/openai",
+            default_model="gemini-3.8-flash",
+        )
     if provider == "mock":
         from .mock_provider import mock_reviewer
 

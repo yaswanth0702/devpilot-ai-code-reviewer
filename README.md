@@ -74,20 +74,22 @@ changing: prompts, tools and model providers. Either one can be deployed or scal
   - at most 12 comments per review, ordered by severity
 - **Human stays in charge.** Reviews are posted with `event: COMMENT`. DevPilot never approves
   or blocks a PR.
-- **Provider-agnostic.** One internal message format, with adapters for Anthropic and OpenAI.
-  `OPENAI_BASE_URL` also works with Ollama or vLLM for self-hosted models.
+- **Provider-agnostic.** One internal message format, with adapters for Anthropic and for the
+  OpenAI format. Gemini uses Google's OpenAI-compatible endpoint, and Gemini 3 *thought signatures*
+  are carried through tool-call turns so multi-step reviews keep working. `OPENAI_BASE_URL` also
+  works with Ollama or vLLM for self-hosted models.
 
 ---
 
 ## Quick start: local mode (no GitHub needed)
 
 **One step:** `bash scripts/setup_and_run.sh` installs everything, runs the tests, asks for your
-API key (hidden, never saved) and runs the benchmark. To do it by hand instead:
+API key (hidden, never saved) and runs the benchmark. Add `openai` or `gemini` to use those providers. To do it by hand instead:
 
 ```bash
 cd agent
 pip install -e ".[dev]"
-export ANTHROPIC_API_KEY=sk-ant-...      # or OPENAI_API_KEY + --provider openai
+export ANTHROPIC_API_KEY=sk-ant-...      # or OPENAI_API_KEY / GEMINI_API_KEY with --provider openai / gemini
 
 cd ~/code/my-project
 devpilot review                          # uncommitted changes
@@ -155,11 +157,11 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 21 passing | diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 23 passing | OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 21 passed
+cd agent && pytest -q          # 23 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
@@ -183,7 +185,7 @@ A comment counts as correct if it lands within ±2 lines of the planted bug.
 ```bash
 cd agent
 python -m evals.run_eval --provider mock        # offline baseline
-python -m evals.run_eval --provider anthropic   # LLM agent
+python -m evals.run_eval --provider anthropic   # LLM agent (or openai / gemini)
 ```
 
 Each run writes a Markdown and JSON report to `agent/evals/results/`.
@@ -191,7 +193,7 @@ Each run writes a Markdown and JSON report to `agent/evals/results/`.
 | Reviewer | Precision | Recall | F1 | Clean PRs with false positives |
 |---|---|---|---|---|
 | Rule-based baseline (`mock`, regex) | 1.000 | 0.273 | 0.429 | 0 / 3 |
-| LLM agent (`anthropic`) | *run the command above* | | | |
+| LLM agent (`anthropic` / `gemini`) | *run the command above* | | | |
 
 The baseline is precise but misses 8 of 11 bugs. Defects like races, off-by-one errors, N+1
 queries and resource leaks need an understanding of the code, which regex can't provide. That gap
@@ -205,7 +207,8 @@ the LLM row is filled in by running the eval with an API key
 
 | Variable | Service | Default | Purpose |
 |---|---|---|---|
-| `DEVPILOT_PROVIDER` | agent | `anthropic` | `anthropic`, `openai` or `mock` |
+| `DEVPILOT_PROVIDER` | agent | `anthropic` | `anthropic`, `openai`, `gemini` or `mock` |
+| `GEMINI_API_KEY` | agent | none | key from Google AI Studio |
 | `DEVPILOT_MODEL` | agent | provider default | model override |
 | `DEVPILOT_MAX_STEPS` | agent | `8` | tool-use step budget |
 | `DEVPILOT_MIN_CONFIDENCE` | agent | `0.5` | verifier confidence threshold |
@@ -225,7 +228,7 @@ agent/                      Python agent service + CLI
     verifier.py             guardrail rules
     diff_parser.py          unified diff -> changed-line map
     repo.py                 InMemory / LocalGit / GitHub repos, BM25 code index
-    llm.py                  Anthropic + OpenAI adapters, retries, scripted test double
+    llm.py                  Anthropic + OpenAI-format adapters (OpenAI, Gemini, Ollama), retries, test double
     mock_provider.py        offline rule-based stand-in
     app.py                  FastAPI: /review, /health, /metrics
     cli.py                  `devpilot review`

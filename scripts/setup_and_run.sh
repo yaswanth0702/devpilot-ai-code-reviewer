@@ -4,6 +4,7 @@
 #
 #   bash scripts/setup_and_run.sh              # Anthropic (default)
 #   bash scripts/setup_and_run.sh openai       # OpenAI
+#   bash scripts/setup_and_run.sh gemini       # Google Gemini
 set -euo pipefail
 
 PROVIDER="${1:-anthropic}"
@@ -31,7 +32,8 @@ pytest -q
 case "$PROVIDER" in
   anthropic) KEYVAR=ANTHROPIC_API_KEY ;;
   openai)    KEYVAR=OPENAI_API_KEY ;;
-  *) echo "provider must be anthropic or openai"; exit 1 ;;
+  gemini)    KEYVAR=GEMINI_API_KEY ;;
+  *) echo "provider must be anthropic, openai or gemini"; exit 1 ;;
 esac
 
 if [[ -z "${!KEYVAR:-}" ]]; then
@@ -51,4 +53,4 @@ echo
 echo "To review your own code later:"
 echo "  source $ROOT/agent/.venv/bin/activate"
 echo "  export $KEYVAR=...   # your key"
-echo "  cd /path/to/any/git/project && devpilot review"
+echo "  cd /path/to/any/git/project && devpilot review --provider $PROVIDER"

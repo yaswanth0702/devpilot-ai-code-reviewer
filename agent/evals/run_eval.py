@@ -118,7 +118,7 @@ def to_markdown(rep: dict) -> str:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--provider", default="mock", choices=["mock", "anthropic", "openai"])
+    p.add_argument("--provider", default="mock", choices=["mock", "anthropic", "openai", "gemini"])
     p.add_argument("--model")
     p.add_argument("--repeats", type=int, default=1)
     args = p.parse_args()

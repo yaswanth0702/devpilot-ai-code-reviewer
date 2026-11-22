@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     g = r.add_mutually_exclusive_group()
     g.add_argument("--base", help="review current branch against this base, e.g. main")
     g.add_argument("--staged", action="store_true", help="review staged changes only")
-    r.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "mock"])
+    r.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "gemini", "mock"])
     r.add_argument("--model", default=None)
     r.add_argument("--format", default="text", choices=["text", "json"])
     r.add_argument("--min-confidence", type=float, default=0.5)
