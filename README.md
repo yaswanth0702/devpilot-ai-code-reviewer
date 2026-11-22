@@ -193,13 +193,24 @@ Each run writes a Markdown and JSON report to `agent/evals/results/`.
 | Reviewer | Precision | Recall | F1 | Clean PRs with false positives |
 |---|---|---|---|---|
 | Rule-based baseline (`mock`, regex) | 1.000 | 0.273 | 0.429 | 0 / 3 |
-| LLM agent (`anthropic` / `gemini`) | *run the command above* | | | |
+| LLM agent (`gemini`, `gemini-3.1-flash-lite`, reasoning effort `minimal`) | 0.769 | 0.909 | 0.833 | 3 / 3 |
 
-The baseline is precise but misses 8 of 11 bugs. Defects like races, off-by-one errors, N+1
-queries and resource leaks need an understanding of the code, which regex can't provide. That gap
-is what the LLM agent is measured against. Numbers in this table come only from real runs;
-the LLM row is filled in by running the eval with an API key
-([report](agent/evals/results/mock.md)).
+Gemini run: one pass over the 14 cases on 2026-11-22. The LLM agent found **10 of 11 planted
+bugs** (recall 0.909), compared with 3 of 11 for the regex baseline. It caught the bugs that need
+an understanding of the code: the race condition, the off-by-one error, the N+1 query and
+`Optional.get()`. It missed the resource leak, where the reader isn't closed if an exception is
+thrown. The weak spot is **false positives: it flagged one issue on each of the 3 clean PRs**, so
+lowering noise on correct code is the next thing to improve, for example by tuning the verifier's
+confidence threshold or adding a self-check step. Latency varied a lot (1–175 s per review)
+because the API returned 503s and timeouts during the run, which DevPilot retried automatically.
+
+These numbers come from a single run on a small benchmark, so treat them as indicative. To
+reproduce them:
+
+```bash
+DEVPILOT_MODEL=gemini-3.1-flash-lite DEVPILOT_REASONING_EFFORT=minimal \
+  python -m evals.run_eval --provider gemini
+```
 
 ---
 
@@ -246,7 +257,8 @@ docker-compose.yml
 
 ## Roadmap
 
-- [ ] Run the benchmark against Claude and GPT and compare cost and latency per review
+- [ ] Cut false positives on clean PRs (currently 3/3 for Gemini Flash-Lite)
+- [ ] Run the benchmark against Claude, GPT and larger Gemini models and compare cost and latency per review
 - [ ] Embedding-based code search alongside BM25 (hybrid retrieval)
 - [ ] Re-review only new commits on `synchronize`, and resolve comments that were fixed
 - [ ] GitHub App authentication (installation tokens) instead of a personal access token
