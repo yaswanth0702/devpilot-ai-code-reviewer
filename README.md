@@ -1,11 +1,13 @@
 # DevPilot: AI Code Review Agent
 
-DevPilot is an LLM agent that reviews code changes like a senior engineer. It reads the diff,
+DevPilot is an LLM agent that reviews code like a senior engineer. It reads the change,
 **investigates the surrounding code with tools** (file reads, BM25 code search), and reports
 specific, line-level problems: bugs, security holes, concurrency issues, broken error handling
-and performance traps. Each problem comes with a concrete fix.
+and performance traps. Each problem comes with a concrete fix, and DevPilot can also write the
+fixed version of the code for you to check.
 
-It runs two ways:
+It works with Gemini, Claude and GPT, and with self-hosted models through any OpenAI-compatible
+API. It runs four ways:
 
 | Mode | How you use it | Needs GitHub? |
 |---|---|---|
@@ -16,6 +18,16 @@ It runs two ways:
 
 Every comment passes through a **verifier guardrail** before you see it. The guardrail removes
 hallucinated files, comments on lines the PR didn't touch, low-confidence guesses, duplicates and nits.
+
+**Highlights**
+
+- Found **10 of 11** planted bugs on a seeded-bug benchmark, against 3 of 11 for a regex baseline
+  (recall 0.91, F1 0.83, Gemini Flash-Lite). See [Results](#results).
+- **Live on GitHub:** this repo reviews its own pull requests and pushes. See
+  [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) for a real review.
+- **Paste-and-fix:** caught all 3 bugs in a Java class and produced a minimal, correct fix
+  ([example](docs/paste-review-example.md)).
+- **Tested:** 40 Python tests and 8 Java tests run in CI on Python 3.10 and 3.12.
 
 ---
 
@@ -40,17 +52,23 @@ flowchart LR
       V[Verifier guardrail]
     end
 
-    LLM[(LLM provider<br/>Anthropic / OpenAI /<br/>OpenAI-compatible)]
-    CLI[devpilot CLI<br/>local mode]
+    LLM[(LLM provider<br/>Gemini / Claude / GPT /<br/>OpenAI-compatible)]
+    CLI[devpilot CLI<br/>review · check · web]
+    GA[GitHub Action<br/>runs on GitHub]
 
     PR -- webhook --> WH --> Q --> W -- POST /review --> L
+    PR -- workflow --> GA --> L
     L <--> LLM
     L <--> T
     L --> V --> W -- review API --> RV
+    V --> GA -- review API --> RV
     CLI --> L
 ```
 
-**Why two services?** The gateway handles the parts that need to be reliable: signature checks,
+All entry points (CLI, paste page, GitHub Action, self-hosted gateway) share the same agent loop
+and verifier, so a review behaves the same wherever it runs.
+
+**Why two services in self-hosted mode?** The gateway handles the parts that need to be reliable: signature checks,
 durable queueing, retries, idempotency and the GitHub API. The agent handles the parts that keep
 changing: prompts, tools and model providers. Either one can be deployed or scaled on its own.
 
@@ -83,22 +101,46 @@ changing: prompts, tools and model providers. Either one can be deployed or scal
 
 ---
 
-## Quick start: local mode (no GitHub needed)
+## Quick start
 
-**One step:** `bash scripts/setup_and_run.sh` installs everything, runs the tests, asks for your
-API key (hidden, never saved) and runs the benchmark. Add `openai` or `gemini` to use those providers. To do it by hand instead:
+Requirements: Python 3.10+ and git. You also need an API key: a Gemini key from
+[Google AI Studio](https://aistudio.google.com/apikey) (it starts with `AIza`), an Anthropic key or
+an OpenAI key.
+
+**One step:**
 
 ```bash
-cd agent
-pip install -e ".[dev]"
-export ANTHROPIC_API_KEY=sk-ant-...      # or OPENAI_API_KEY / GEMINI_API_KEY with --provider openai / gemini
+git clone https://github.com/yaswanth0702/devpilot-ai-code-reviewer.git
+cd devpilot-ai-code-reviewer
+bash scripts/setup_and_run.sh gemini     # or anthropic / openai
+```
+
+This creates `agent/.venv`, installs DevPilot, runs the tests, asks for your API key (hidden,
+never saved) and runs the benchmark.
+
+**Every new Terminal window** needs the environment activated and the key set:
+
+```bash
+cd devpilot-ai-code-reviewer && source agent/.venv/bin/activate
+export GEMINI_API_KEY=AIza...            # or ANTHROPIC_API_KEY / OPENAI_API_KEY
+```
+
+Tip: `export DEVPILOT_PROVIDER=gemini` makes Gemini the default, so you can leave out `--provider`
+(the pre-push hook relies on this too). With `--provider gemini`, DevPilot uses `gemini-3.1-flash-lite` with minimal reasoning by
+default. That's fast, and it's the setup the published benchmark used. Override it with
+`DEVPILOT_MODEL` and `DEVPILOT_REASONING_EFFORT`.
+
+### Review your changes in a git repo
+
+```bash
 
 cd ~/code/my-project
-devpilot review                          # uncommitted changes
-devpilot review --staged                 # staged changes only
-devpilot review --base main              # your branch vs main
-devpilot review --format json            # machine-readable
-devpilot review --fail-on critical       # exit 1 on critical issues (for hooks/CI)
+devpilot review --provider gemini                    # uncommitted changes
+devpilot review --provider gemini --staged           # staged changes only
+devpilot review --provider gemini --base main        # your branch vs main
+devpilot review --provider gemini --base HEAD~3      # the last 3 commits
+devpilot review --provider gemini --format json      # machine-readable
+devpilot review --provider gemini --fail-on critical # exit 1 on critical issues (for hooks/CI)
 ```
 
 No API key yet? Add `--provider mock` to run the full pipeline with an offline, rule-based stand-in
@@ -137,6 +179,35 @@ pbpaste | devpilot check --name app.py --provider gemini --fix   # review whatev
 The fix step only applies the issues the review found and keeps everything else as it was. Read
 the diff before using it, because AI-written fixes can be wrong.
 
+**Real example:** pasting a small Java `Counter` class with three bugs (`==` on strings, an
+unclosed `BufferedReader`, a non-atomic `count++`). DevPilot flagged all three and suggested this
+fix:
+
+```diff
++import java.util.concurrent.atomic.AtomicInteger;
+-    private int count = 0;
++    private AtomicInteger count = new AtomicInteger(0);
+-        count++;
++        count.incrementAndGet();
+-        return role == "ADMIN";
++        return "ADMIN".equals(role);
+-        BufferedReader reader = new BufferedReader(new FileReader(path));
+-        return reader.readLine();
++        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
++            return reader.readLine();
++        }
+```
+
+The full review is in [docs/paste-review-example.md](docs/paste-review-example.md).
+
+**Troubleshooting:**
+- *"API key was rejected"* means the key isn't set or isn't valid. Run
+  `export GEMINI_API_KEY=...` in the same Terminal window, then restart `devpilot web`.
+- If port 8000 is busy because an old server is still running, stop it with
+  `lsof -ti:8000 | xargs kill` or start on another port with `devpilot web --port 8001`.
+
+---
+
 ## Run it on GitHub (GitHub Action), the easiest way
 
 DevPilot runs on GitHub's own servers: every pull request gets reviewed automatically, with inline
@@ -145,7 +216,8 @@ comments on the changed lines. There's no server to host and nothing to install.
 **Set up any of your repositories in two steps:**
 
 1. Add your API key as a secret in the repo you want reviewed: **Settings → Secrets and variables →
-   Actions → New repository secret**, name `GEMINI_API_KEY`.
+   Actions → New repository secret**, name `GEMINI_API_KEY`. Or, from a terminal with the GitHub CLI:
+   `gh secret set GEMINI_API_KEY --repo <owner>/<repo>`.
 2. Copy [`examples/devpilot-review.yml`](examples/devpilot-review.yml) into that repo as
    `.github/workflows/devpilot-review.yml`:
 
@@ -181,8 +253,13 @@ jobs:
 | Draft PRs, PRs from forks | Skipped |
 | Changes that touch only non-code files (docs, images, lock files, data) | Skipped; no API calls are made |
 
-**Live example:** [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) is a demo PR with planted bugs. DevPilot
-flagged the SQL injection (critical) and the bare `except` (major), each with a suggested fix.
+**Live examples in this repo:**
+- [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) is a demo PR with three planted
+  bugs. DevPilot flagged the SQL injection (critical) and the bare `except` (major), each with a
+  suggested fix. It missed the N+1 query.
+- Direct pushes to `main` were verified with three real pushes. A code-only push was reviewed with a
+  commit comment, a docs-only push was skipped with no API calls, and a push that mixed code and
+  docs was reviewed.
 
 On a PR, DevPilot posts one review: a summary, plus inline comments with suggested fixes.
 If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
@@ -197,7 +274,11 @@ docs and other files) and `fail-on-critical` (default `false`). Code files are s
 `pom.xml`) and build scripts.
 PRs from forks don't receive repository secrets, so they are not reviewed.
 
-## GitHub mode (self-hosted server)
+---
+
+## Self-hosted server (Spring Boot gateway)
+
+Use this if you want to run the review service yourself instead of in GitHub Actions.
 
 ### 1. Run the services
 
@@ -242,13 +323,16 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 39 passing | paste/single-file review and fix-with-diff (CLI, API, web page), GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 40 passing | clear error for rejected API keys, paste/single-file review and fix-with-diff (CLI, API, web page), GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 39 passed
+cd agent && pytest -q          # 40 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
+
+CI runs the agent tests on Python 3.10 and 3.12, plus the gateway tests and the offline benchmark, on
+every push.
 
 ### End-to-end run
 
@@ -331,10 +415,14 @@ DEVPILOT_MODEL=gemini-3.1-flash-lite DEVPILOT_REASONING_EFFORT=minimal \
 | Variable | Service | Default | Purpose |
 |---|---|---|---|
 | `DEVPILOT_PROVIDER` | agent | `anthropic` | `anthropic`, `openai`, `gemini` or `mock` |
-| `GEMINI_API_KEY` | agent | none | key from Google AI Studio |
-| `DEVPILOT_MODEL` | agent | provider default | model override |
+| `GEMINI_API_KEY` / `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | agent | none | provider API key |
+| `DEVPILOT_MODEL` | agent | `gemini-3.1-flash-lite` / `claude-sonnet-5-5` / `gpt-4.1` | model override |
+| `DEVPILOT_REASONING_EFFORT` | agent | `minimal` for Gemini | `minimal`, `low`, `medium` or `high` (OpenAI-format providers) |
+| `DEVPILOT_TIMEOUT` | agent | `120` | seconds to wait per model call; requests are retried on timeouts, 429 and 5xx |
 | `DEVPILOT_MAX_STEPS` | agent | `8` | tool-use step budget |
 | `DEVPILOT_MIN_CONFIDENCE` | agent | `0.5` | verifier confidence threshold |
+| `DEVPILOT_REVIEW_FILES` | Action | `code` | `code` reviews source/config files only; `all` reviews every file |
+| `DEVPILOT_FAIL_ON_CRITICAL` | Action | `false` | fail the check on a critical issue |
 | `OPENAI_BASE_URL` | agent | OpenAI | point at Ollama/vLLM for self-hosted models |
 | `GITHUB_TOKEN` | both | none | read PRs, post reviews |
 | `GITHUB_WEBHOOK_SECRET` | gateway | none | HMAC secret for webhook verification |
@@ -349,11 +437,11 @@ agent/                      Python agent service + CLI
     agent.py                bounded tool-use loop
     tools.py                read_file, search_code, submit_review schemas + executor
     verifier.py             guardrail rules
-    diff_parser.py          unified diff -> changed-line map
-    repo.py                 InMemory / LocalGit / GitHub repos, BM25 code index
+    diff_parser.py          unified diff -> changed-line map, code-file filter
+    repo.py                 InMemory / LocalGit / GitHub PR / GitHub commit repos, BM25 code index
     llm.py                  Anthropic + OpenAI-format adapters (OpenAI, Gemini, Ollama), retries, test double
     mock_provider.py        offline rule-based stand-in
-    app.py                  FastAPI: /review, /health, /metrics
+    app.py                  FastAPI: /review, /check, paste page at /, /health, /metrics
     cli.py                  `devpilot review`, `check` (single file / paste), `web`
     snippet.py              review pasted code and produce a fixed version + diff
     static/index.html       paste-your-code web page
@@ -366,15 +454,21 @@ gateway/                    Java 21 / Spring Boot 3.5 gateway
   client/                   agent + GitHub REST clients
 action.yml                  GitHub Action definition
 examples/                   workflow to copy into your repos
-scripts/                    e2e demo, fake GitHub API, pre-push hook installer
-docs/                       recorded outputs
-.github/workflows/ci.yml    tests + offline eval on every push
+scripts/                    one-step setup, e2e demo, fake GitHub API, pre-push hook installer
+docs/                       recorded outputs and the paste-review example
+.github/workflows/
+  ci.yml                    tests (Python 3.10 + 3.12, Java) + offline eval on every push
+  devpilot-review.yml       DevPilot reviewing this repo's own PRs and pushes
 docker-compose.yml
 ```
 
 ## Roadmap
 
+- [x] GitHub Action: PR reviews, direct-push commit comments, code-only filtering
+- [x] Paste code or check a single file, with a suggested fix shown as a diff
+- [x] Gemini support (OpenAI-compatible endpoint, thought signatures), rate-limit-aware retries
 - [ ] Cut false positives on clean PRs (currently 3/3 for Gemini Flash-Lite)
+- [ ] One-click "Commit suggestion" buttons on PR comments (GitHub suggestion blocks)
 - [ ] Run the benchmark against Claude, GPT and larger Gemini models and compare cost and latency per review
 - [ ] Embedding-based code search alongside BM25 (hybrid retrieval)
 - [ ] Re-review only new commits on `synchronize`, and resolve comments that were fixed

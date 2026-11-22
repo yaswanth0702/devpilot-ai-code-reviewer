@@ -10,7 +10,7 @@ inputs:
     description: "LLM provider: gemini, anthropic or openai"
     default: gemini
   model:
-    description: "Model name (optional). Defaults: gemini-3.8-flash / claude-sonnet-5-5 / gpt-4.1"
+    description: "Model name (optional). Defaults: gemini-3.1-flash-lite / claude-sonnet-5-5 / gpt-4.1"
     default: ""
   reasoning-effort:
     description: "Reasoning effort for OpenAI-compatible providers (minimal, low, medium, high)"

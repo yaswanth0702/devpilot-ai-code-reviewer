@@ -99,5 +99,15 @@ def check(req: CheckRequest) -> dict:
     except ValueError as e:
         raise HTTPException(422, str(e)) from e
     except (LLMError, RuntimeError) as e:
-        raise HTTPException(502, f"LLM provider error: {e}") from e
+        raise HTTPException(502, _friendly(e)) from e
     return out
+
+
+def _friendly(e: Exception) -> str:
+    msg = str(e)
+    if "API key" in msg or "401" in msg[:10] or "permission" in msg.lower():
+        provider = os.getenv("DEVPILOT_PROVIDER", "anthropic")
+        var = {"gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}.get(provider, "ANTHROPIC_API_KEY")
+        return (f"The {provider} API key was rejected. Set a valid key with: export {var}=... "
+                f"and restart `devpilot web`. (Provider said: {msg[:200]})")
+    return f"LLM provider error: {msg}"

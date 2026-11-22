@@ -66,3 +66,19 @@ def test_cli_check_file_with_fix(tmp_path, capsys):
     assert main(["check", str(f), "--provider", "mock", "--format", "json", "--fix"]) == 0
     out = json.loads(capsys.readouterr().out)
     assert out["comments"][0]["line"] == 2 and "fixed_code" in out
+
+
+def test_rejected_api_key_gives_clear_message(monkeypatch):
+    from devpilot_agent.llm import LLMError
+
+    class BadKey:
+        model = "x"
+
+        def complete(self, *a):
+            raise LLMError('HTTP 400: [{"error": {"message": "Please pass a valid API key"}}]')
+
+    monkeypatch.setenv("DEVPILOT_PROVIDER", "gemini")
+    monkeypatch.setattr(app_module, "make_client", lambda *a: BadKey())
+    r = TestClient(app_module.app).post("/check", json={"code": CODE})
+    assert r.status_code == 502
+    assert "export GEMINI_API_KEY=" in r.json()["detail"]

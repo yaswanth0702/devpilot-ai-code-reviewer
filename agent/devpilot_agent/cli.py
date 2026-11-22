@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 
 from .agent import ReviewAgent
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     g = r.add_mutually_exclusive_group()
     g.add_argument("--base", help="review current branch against this base, e.g. main")
     g.add_argument("--staged", action="store_true", help="review staged changes only")
-    r.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "gemini", "mock"])
+    r.add_argument("--provider", default=os.getenv("DEVPILOT_PROVIDER", "anthropic"), choices=["anthropic", "openai", "gemini", "mock"])
     r.add_argument("--model", default=None)
     r.add_argument("--format", default="text", choices=["text", "json"])
     r.add_argument("--min-confidence", type=float, default=0.5)
@@ -52,18 +53,17 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--name", help="file name for pasted code, e.g. app.py (helps detect the language)")
     c.add_argument("--fix", action="store_true", help="also produce a fixed version and show the changes")
     c.add_argument("--write", action="store_true", help="with --fix: save the fixed code next to the file as <name>.fixed<ext>")
-    c.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "gemini", "mock"])
+    c.add_argument("--provider", default=os.getenv("DEVPILOT_PROVIDER", "anthropic"), choices=["anthropic", "openai", "gemini", "mock"])
     c.add_argument("--model", default=None)
     c.add_argument("--format", default="text", choices=["text", "json"])
     c.add_argument("-v", "--verbose", action="store_true")
     w = sub.add_parser("web", help="open a local web page where you can paste code for review")
-    w.add_argument("--provider", default="anthropic", choices=["anthropic", "openai", "gemini", "mock"])
+    w.add_argument("--provider", default=os.getenv("DEVPILOT_PROVIDER", "anthropic"), choices=["anthropic", "openai", "gemini", "mock"])
     w.add_argument("--port", type=int, default=8000)
     args = p.parse_args(argv)
     if args.cmd == "check":
         return _check(args)
     if args.cmd == "web":
-        import os
         import threading
         import webbrowser
 

@@ -247,8 +247,8 @@ def make_client(provider: str, model: str | None = None) -> LLMClient:
             model,
             key_env="GEMINI_API_KEY",
             base_url="https://generativelanguage.googleapis.com/v1beta/openai",
-            default_model="gemini-3.8-flash",
-            reasoning_effort="low",
+            default_model="gemini-3.1-flash-lite",  # fast; the model used for the published benchmark
+            reasoning_effort="minimal",
         )
     if provider == "mock":
         from .mock_provider import mock_reviewer
