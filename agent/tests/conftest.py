@@ -50,9 +50,10 @@ def sample_files():
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    """Tests must not depend on the developer's DEVPILOT_* / API-key settings."""
+    """Tests must not depend on the developer's DEVPILOT_* settings or on the GitHub Actions
+    environment they may be running in (GITHUB_EVENT_NAME, GITHUB_STEP_SUMMARY, ...)."""
     import os
 
     for name in list(os.environ):
-        if name.startswith("DEVPILOT_") or name in ("OPENAI_BASE_URL",):
+        if name.startswith(("DEVPILOT_", "GITHUB_")) or name in ("OPENAI_BASE_URL",):
             monkeypatch.delenv(name, raising=False)
