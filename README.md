@@ -190,10 +190,10 @@ python -m evals.run_eval --provider anthropic   # LLM agent (or openai / gemini)
 
 Each run writes a Markdown and JSON report to `agent/evals/results/`.
 
-| Reviewer | Precision | Recall | F1 | Clean PRs with false positives |
-|---|---|---|---|---|
-| Rule-based baseline (`mock`, regex) | 1.000 | 0.273 | 0.429 | 0 / 3 |
-| LLM agent (`gemini`, `gemini-3.1-flash-lite`, reasoning effort `minimal`) | 0.769 | 0.909 | 0.833 | 3 / 3 |
+| Reviewer | Precision | Recall | F1 | Bug-type accuracy | Clean PRs with false positives | Avg tool calls | Report |
+|---|---|---|---|---|---|---|---|
+| Rule-based baseline (`mock`, regex) | 1.000 | 0.273 | 0.429 | 1.000 | 0 / 3 | 3.0 | [mock.md](agent/evals/results/mock.md) |
+| **LLM agent** (`gemini-3.1-flash-lite`, reasoning `minimal`) | **0.769** | **0.909** | **0.833** | 0.800 | 3 / 3 | 3.0 | [gemini.md](agent/evals/results/gemini.md) |
 
 Gemini run: one pass over the 14 cases on 2026-11-22. The LLM agent found **10 of 11 planted
 bugs** (recall 0.909), compared with 3 of 11 for the regex baseline. It caught the bugs that need
@@ -203,6 +203,33 @@ thrown. The weak spot is **false positives: it flagged one issue on each of the 
 lowering noise on correct code is the next thing to improve, for example by tuning the verifier's
 confidence threshold or adding a self-check step. Latency varied a lot (1–175 s per review)
 because the API returned 503s and timeouts during the run, which DevPilot retried automatically.
+
+When it found a bug, it named the right bug type (security, concurrency and so on) 80% of the time.
+It used about 3 tool calls per review on average; on harder cases like `Optional.get()` and the
+N+1 query it investigated further (7–8 tool calls). The whole run used about 46k tokens.
+
+**Per case (Gemini):**
+
+| Case | Found? | Tool calls |
+|---|---|---|
+| SQL injection (Java) | ✅ | 2 |
+| `==` on strings (Java) | ✅ | 2 |
+| Resource leak (Java) | ❌ missed | 1 |
+| Race condition (Java) | ✅ | 2 |
+| `Optional.get()` without check (Java) | ✅ | 7 |
+| Swallowed exception (Java) | ✅ | 5 |
+| Off-by-one (Java) | ✅ | 2 |
+| Hard-coded secret (Python) | ✅ | 2 |
+| Mutable default argument (Python) | ✅ | 1 |
+| Bare `except` (Python) | ✅ | 2 |
+| N+1 query (Python) | ✅ | 8 |
+| Clean PR: Java refactor | ⚠️ 1 false positive | 2 |
+| Clean PR: parameterized SQL (Python) | ⚠️ 1 false positive | 3 |
+| Clean PR: try-with-resources (Java) | ⚠️ 1 false positive | 3 |
+
+The full report, including every comment the agent made, is in
+[`agent/evals/results/gemini.md`](agent/evals/results/gemini.md) and
+[`gemini.json`](agent/evals/results/gemini.json).
 
 These numbers come from a single run on a small benchmark, so treat them as indicative. To
 reproduce them:
