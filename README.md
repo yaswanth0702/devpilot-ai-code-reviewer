@@ -157,6 +157,9 @@ jobs:
 | Draft PRs, PRs from forks | Skipped |
 | Changes that touch only non-code files (docs, images, lock files, data) | Skipped; no API calls are made |
 
+**Live example:** [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) is a demo PR with planted bugs. DevPilot
+flagged the SQL injection (critical) and the bare `except` (major), each with a suggested fix.
+
 On a PR, DevPilot posts one review: a summary, plus inline comments with suggested fixes.
 If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
 It always posts as `COMMENT` and never approves or blocks a PR. You can opt in with
