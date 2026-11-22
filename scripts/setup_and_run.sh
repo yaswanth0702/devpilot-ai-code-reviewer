@@ -14,8 +14,8 @@ cd "$ROOT/agent"
 say() { printf "\n\033[1;34m==> %s\033[0m\n" "$*"; }
 
 command -v python3 >/dev/null || { echo "python3 not found. Install it with: brew install python"; exit 1; }
-PYV=$(python3 -c 'import sys; print(sys.version_info >= (3, 11))')
-[[ "$PYV" == "True" ]] || { echo "Python 3.11+ needed (found $(python3 --version)). Run: brew install python"; exit 1; }
+PYV=$(python3 -c 'import sys; print(sys.version_info >= (3, 10))')
+[[ "$PYV" == "True" ]] || { echo "Python 3.10+ needed (found $(python3 --version)). Run: brew install python"; exit 1; }
 
 say "Creating virtual environment (agent/.venv)"
 [[ -d .venv ]] || python3 -m venv .venv
