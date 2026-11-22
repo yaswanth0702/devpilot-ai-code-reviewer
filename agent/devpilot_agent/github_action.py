@@ -16,6 +16,7 @@ import sys
 import httpx
 
 from .agent import ReviewAgent
+from .diff_parser import filter_code_diff
 from .llm import make_client
 from .models import ReviewComment, ReviewResult
 from .repo import GitHubCommitRepo, GitHubRepo
@@ -92,6 +93,36 @@ def _make_agent():
     return agent, provider, getattr(llm, "model", provider)
 
 
+class _CodeOnly:
+    """Wraps a repo so the agent only sees code files in the diff."""
+
+    def __init__(self, inner, diff: str):
+        self._inner, self._diff = inner, diff
+        self.head_sha = getattr(inner, "head_sha", None)
+
+    def diff(self) -> str:
+        return self._diff
+
+    def read_file(self, path):
+        return self._inner.read_file(path)
+
+    def list_files(self):
+        return self._inner.list_files()
+
+
+def _code_only(target):
+    """Returns (repo_to_review or None if nothing to review, skipped_paths)."""
+    if os.getenv("DEVPILOT_REVIEW_FILES", "code") == "all":
+        return (target if target.diff().strip() else None), []
+    code_diff, skipped = filter_code_diff(target.diff())
+    if skipped:
+        print(f"Skipping {len(skipped)} non-code file(s): {', '.join(skipped[:10])}{' ...' if len(skipped) > 10 else ''}")
+    if not code_diff.strip():
+        print("No code files changed; nothing to review.")
+        return None, skipped
+    return _CodeOnly(target, code_diff), skipped
+
+
 def _finish(result: ReviewResult, model: str) -> int:
     summary_file = os.getenv("GITHUB_STEP_SUMMARY")
     if summary_file:
@@ -117,11 +148,10 @@ def review_push(event: dict, token: str) -> int:
         print("Push comes from a merged pull request that was already reviewed; skipping.")
         return 0
 
-    agent, provider, model = _make_agent()
-    target = GitHubCommitRepo(owner, repo, before, after, token)
-    if not target.diff().strip():
-        print("No code changes in this push.")
+    target, _ = _code_only(GitHubCommitRepo(owner, repo, before, after, token))
+    if target is None:
         return 0
+    agent, provider, model = _make_agent()
     print(f"DevPilot reviewing push {before[:7] if before else '(new)'}..{after[:7]} on {owner}/{repo} with {provider} ({model})")
     result = agent.review(target)
     print(f"{len(result.comments)} comment(s), {len(result.dropped)} filtered, {result.tool_calls} tool calls")
@@ -156,11 +186,13 @@ def main() -> int:
 
     owner, repo = os.environ["GITHUB_REPOSITORY"].split("/", 1)
     number = int(pr["number"])
+    gh = GitHubRepo(owner, repo, number, token)
+    target, _ = _code_only(gh)
+    if target is None:
+        return 0
     agent, provider, model = _make_agent()
     print(f"DevPilot reviewing {owner}/{repo}#{number} with {provider} ({model})")
-
-    gh = GitHubRepo(owner, repo, number, token)
-    result = agent.review(gh)
+    result = agent.review(target)
     print(f"{len(result.comments)} comment(s), {len(result.dropped)} filtered, {result.tool_calls} tool calls")
 
     mode = post_review(_api_client(token), GitHubRepo.API, owner, repo, number, gh.head_sha, result, model)

@@ -30,6 +30,9 @@ inputs:
   min-confidence:
     description: Drop comments below this confidence (0-1)
     default: "0.5"
+  review-files:
+    description: "code = only source/config files (skip docs, images, lock files, data); all = every file"
+    default: code
   fail-on-critical:
     description: Fail the check when a critical issue is found
     default: "false"
@@ -52,6 +55,7 @@ runs:
         DEVPILOT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
         DEVPILOT_MIN_CONFIDENCE: ${{ inputs.min-confidence }}
         DEVPILOT_FAIL_ON_CRITICAL: ${{ inputs.fail-on-critical }}
+        DEVPILOT_REVIEW_FILES: ${{ inputs.review-files }}
         DEVPILOT_TIMEOUT: "180"
         GEMINI_API_KEY: ${{ inputs.gemini-api-key }}
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}

@@ -30,6 +30,14 @@ DIFF = f"""diff --git a/{PATH} b/{PATH}
 HEAD_SHA = "3f2a9c1e0b7d4a5f8e6c2b1a0d9e8f7c6b5a4d3e"
 BASE_SHA = "1111111111111111111111111111111111111111"
 MERGED_SHA = "2222222222222222222222222222222222222222"  # a commit that came from a merged PR
+DOCS_SHA = "3333333333333333333333333333333333333333"  # a docs-only commit
+DOCS_DIFF = """diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1,1 +1,2 @@
+ # Demo
++More docs with password = "not-a-real-secret-value"
+"""
 REVIEWS: list[dict] = []
 COMMIT_COMMENTS: list[dict] = []
 
@@ -55,6 +63,10 @@ class Handler(BaseHTTPRequestHandler):
             if "diff" in accept:
                 return self._send(200, DIFF, "text/plain")
             return self._send(200, {"files": [{"filename": PATH, "status": "modified"}]})
+        if p == f"/repos/yaswanth0702/demo/compare/{BASE_SHA}...{DOCS_SHA}":
+            if "diff" in accept:
+                return self._send(200, DOCS_DIFF, "text/plain")
+            return self._send(200, {"files": [{"filename": "README.md", "status": "modified"}]})
         if p.startswith("/repos/yaswanth0702/demo/commits/") and p.endswith("/pulls"):
             merged = MERGED_SHA in p
             return self._send(200, [{"number": 7, "merged_at": "2026-11-22T00:00:00Z"}] if merged else [])

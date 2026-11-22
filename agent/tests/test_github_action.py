@@ -134,3 +134,18 @@ def test_push_from_merged_pr_is_skipped(tmp_path, monkeypatch, capsys):
         assert mod.COMMIT_COMMENTS == [] and "already reviewed" in capsys.readouterr().out
     finally:
         server.shutdown()
+
+
+def test_docs_only_push_is_skipped(tmp_path, monkeypatch, capsys):
+    mod, server = _fake_github()
+    try:
+        _push_env(tmp_path, monkeypatch, server, {"before": mod.BASE_SHA, "after": mod.DOCS_SHA})
+        assert github_action.main() == 0
+        out = capsys.readouterr().out
+        assert mod.COMMIT_COMMENTS == [] and "No code files changed" in out and "README.md" in out
+        # ...unless the user opts into reviewing every file
+        monkeypatch.setenv("DEVPILOT_REVIEW_FILES", "all")
+        assert github_action.main() == 0
+        assert len(mod.COMMIT_COMMENTS) == 1
+    finally:
+        server.shutdown()

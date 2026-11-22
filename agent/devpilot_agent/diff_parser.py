@@ -62,3 +62,47 @@ def parse_unified_diff(diff: str) -> dict[str, FileDiff]:
             current.context_lines.add(new_line)
             new_line += 1
     return files
+
+
+# ---------------------------------------------------------------- code-only filtering
+CODE_EXTENSIONS = {
+    ".py", ".java", ".kt", ".kts", ".scala", ".groovy", ".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx",
+    ".go", ".rs", ".c", ".h", ".cc", ".cpp", ".hpp", ".cs", ".rb", ".php", ".swift", ".m", ".dart",
+    ".sql", ".sh", ".bash", ".zsh", ".ps1", ".tf", ".hcl", ".yml", ".yaml", ".gradle", ".vue", ".svelte",
+    ".r", ".lua", ".pl", ".ex", ".exs", ".erl", ".hs", ".clj", ".fs", ".vb",
+}
+CODE_FILENAMES = {"Dockerfile", "Makefile", "Jenkinsfile", "pom.xml", "build.gradle", "settings.gradle"}
+
+
+def is_code_file(path: str) -> bool:
+    name = path.rsplit("/", 1)[-1]
+    if name in CODE_FILENAMES or name.startswith("Dockerfile"):
+        return True
+    dot = name.rfind(".")
+    return dot > 0 and name[dot:].lower() in CODE_EXTENSIONS
+
+
+def filter_code_diff(diff: str) -> tuple[str, list[str]]:
+    """Keep only the file sections of a unified diff that touch code files.
+
+    Returns (filtered_diff, skipped_paths)."""
+    sections: list[list[str]] = []
+    for line in diff.splitlines(keepends=True):
+        if line.startswith("diff --git") or not sections:
+            sections.append([])
+        sections[-1].append(line)
+    kept, skipped = [], []
+    for sec in sections:
+        path = None
+        for line in sec:
+            if line.startswith("+++ ") and line[4:].strip() != "/dev/null":
+                path = line[4:].strip()
+                path = path[2:] if path.startswith("b/") else path
+                break
+            if line.startswith("--- ") and line[4:].strip() != "/dev/null":
+                p = line[4:].strip()
+                path = p[2:] if p.startswith("a/") else p
+        if path is None:
+            continue  # binary or mode-only change
+        (kept if is_code_file(path) else skipped).append((path, sec))
+    return "".join("".join(sec) for _, sec in kept), [p for p, _ in skipped]

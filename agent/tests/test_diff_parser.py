@@ -1,4 +1,4 @@
-from devpilot_agent.diff_parser import parse_unified_diff
+from devpilot_agent.diff_parser import filter_code_diff, is_code_file, parse_unified_diff
 
 
 def test_added_and_context_lines(sample_diff):
@@ -55,3 +55,36 @@ def test_multiple_hunks():
  z
 """
     assert parse_unified_diff(diff)["f.txt"].added_lines == {1, 51}
+
+
+def test_is_code_file():
+    for p in ["a.py", "src/App.java", "web/x.tsx", "infra/main.tf", "Dockerfile", "Dockerfile.dev", "pom.xml", "ci.yml"]:
+        assert is_code_file(p), p
+    for p in ["README.md", "docs/guide.txt", "logo.png", "package-lock.json", "data.csv", "LICENSE", ".gitignore"]:
+        assert not is_code_file(p), p
+
+
+def test_filter_code_diff_keeps_only_code_sections():
+    diff = """diff --git a/README.md b/README.md
+--- a/README.md
++++ b/README.md
+@@ -1 +1,2 @@
+ x
++y
+diff --git a/app.py b/app.py
+--- a/app.py
++++ b/app.py
+@@ -1 +1,2 @@
+ a = 1
++b = 2
+diff --git a/old.py b/old.py
+deleted file mode 100644
+--- a/old.py
++++ /dev/null
+@@ -1 +0,0 @@
+-gone = True
+"""
+    kept, skipped = filter_code_diff(diff)
+    assert "app.py" in kept and "old.py" in kept and "README.md" not in kept
+    assert skipped == ["README.md"]
+    assert set(parse_unified_diff(kept)) == {"app.py"}

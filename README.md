@@ -155,6 +155,7 @@ jobs:
 | Direct push to `main` (no PR) | Reviews the pushed commits and posts a **commit comment** listing issues with links to the lines |
 | Merging a PR into `main` | Skipped, because the code was already reviewed on the PR |
 | Draft PRs, PRs from forks | Skipped |
+| Changes that touch only non-code files (docs, images, lock files, data) | Skipped; no API calls are made |
 
 On a PR, DevPilot posts one review: a summary, plus inline comments with suggested fixes.
 If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
@@ -163,7 +164,10 @@ It always posts as `COMMENT` and never approves or blocks a PR. You can opt in w
 its own PRs with the same action ([workflow](.github/workflows/devpilot-review.yml)).
 
 Inputs: `provider`, `model`, `reasoning-effort`, `gemini-api-key` / `anthropic-api-key` /
-`openai-api-key`, `min-confidence` (default `0.5`) and `fail-on-critical` (default `false`).
+`openai-api-key`, `min-confidence` (default `0.5`), `review-files` (`code` by default; `all` to include
+docs and other files) and `fail-on-critical` (default `false`). Code files are source files
+(`.py`, `.java`, `.ts`, `.go`, `.sql`, …), infrastructure and config (`.tf`, `.yml`, `Dockerfile`,
+`pom.xml`) and build scripts.
 PRs from forks don't receive repository secrets, so they are not reviewed.
 
 ## GitHub mode (self-hosted server)
@@ -211,11 +215,11 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 31 passing | GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 34 passing | GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 31 passed
+cd agent && pytest -q          # 34 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
