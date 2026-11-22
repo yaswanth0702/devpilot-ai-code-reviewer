@@ -10,6 +10,7 @@ It runs two ways:
 | Mode | How you use it | Needs GitHub? |
 |---|---|---|
 | **Local mode** | `devpilot review` in any git repo; results print in your terminal. It can also run as a pre-push hook. | No |
+| **Paste / single file** | `devpilot web` page or `devpilot check file.py --fix`: review any code and get a fixed version. | No |
 | **GitHub Action** | Add one workflow file; GitHub runs DevPilot on every PR and it posts inline comments. | Yes, nothing to host |
 | **Self-hosted server** | Spring Boot gateway receives webhooks, queues reviews and posts comments. | Yes |
 
@@ -112,6 +113,29 @@ scripts/install-pre-push-hook.sh ~/code/my-project
 Example output: see [docs/local-mode-output.txt](docs/local-mode-output.txt).
 
 ---
+
+## Paste code or check a single file
+
+No git and no pull request are needed: paste any code, or point DevPilot at one file, and you get
+a review back. Add `--fix` and DevPilot also writes a **fixed version** and shows exactly what
+changed as a diff. Your original file is never modified.
+
+**In the browser:**
+```bash
+devpilot web --provider gemini     # opens http://127.0.0.1:8000
+```
+Paste your code, click **Review code**, then copy the fixed code if you want it.
+
+**In the terminal:**
+```bash
+devpilot check src/app.py --provider gemini                 # review one file
+devpilot check src/app.py --provider gemini --fix           # + suggested changes as a diff
+devpilot check src/app.py --provider gemini --fix --write   # + save to src/app.fixed.py
+pbpaste | devpilot check --name app.py --provider gemini --fix   # review whatever you copied (macOS)
+```
+
+The fix step only applies the issues the review found and keeps everything else as it was. Read
+the diff before using it, because AI-written fixes can be wrong.
 
 ## Run it on GitHub (GitHub Action), the easiest way
 
@@ -218,11 +242,11 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 | Component | Tests | What they cover |
 |---|---|---|
-| Agent (pytest) | 34 passing | GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Agent (pytest) | 39 passing | paste/single-file review and fix-with-diff (CLI, API, web page), GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
 | Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-cd agent && pytest -q          # 34 passed
+cd agent && pytest -q          # 39 passed
 cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
@@ -330,7 +354,9 @@ agent/                      Python agent service + CLI
     llm.py                  Anthropic + OpenAI-format adapters (OpenAI, Gemini, Ollama), retries, test double
     mock_provider.py        offline rule-based stand-in
     app.py                  FastAPI: /review, /health, /metrics
-    cli.py                  `devpilot review`
+    cli.py                  `devpilot review`, `check` (single file / paste), `web`
+    snippet.py              review pasted code and produce a fixed version + diff
+    static/index.html       paste-your-code web page
     github_action.py        GitHub Action mode: PR reviews and direct-push commit comments
   evals/                    seeded-bug benchmark + runner + results
   tests/

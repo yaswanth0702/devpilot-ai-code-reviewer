@@ -23,6 +23,9 @@ devpilot = "devpilot_agent.cli:main"
 [tool.setuptools.packages.find]
 include = ["devpilot_agent*"]
 
+[tool.setuptools.package-data]
+devpilot_agent = ["static/*.html"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

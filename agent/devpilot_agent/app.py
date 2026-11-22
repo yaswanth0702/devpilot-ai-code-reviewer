@@ -6,12 +6,17 @@ import os
 import threading
 import time
 
+import pathlib
+
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel
 
 from .agent import ReviewAgent
 from .llm import LLMError, make_client
 from .models import ReviewRequest, ReviewResult
 from .repo import GitHubRepo, InMemoryRepo
+from .snippet import fix_code, review_snippet
 from .verifier import VerifierConfig
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
@@ -67,3 +72,32 @@ def review(req: ReviewRequest) -> ReviewResult:
         _metrics["comments_filtered"] += len(result.dropped)
         _metrics["review_seconds_sum"] += time.monotonic() - started
     return result
+
+
+class CheckRequest(BaseModel):
+    code: str
+    filename: str = "pasted_code"
+    fix: bool = False
+
+
+@app.get("/", response_class=HTMLResponse)
+def home() -> str:
+    """Paste-your-code page."""
+    return (pathlib.Path(__file__).parent / "static" / "index.html").read_text(encoding="utf-8")
+
+
+@app.post("/check")
+def check(req: CheckRequest) -> dict:
+    """Review a standalone piece of code; optionally return a fixed version and the diff."""
+    agent = _agent()
+    try:
+        result = review_snippet(agent, req.code, req.filename or "pasted_code")
+        out: dict = {"review": result.model_dump(mode="json"), "fixed_code": None, "diff": "", "fix_notes": ""}
+        if req.fix:
+            fixed, diff, notes = fix_code(agent.llm, req.code, req.filename or "pasted_code", result)
+            out.update(fixed_code=fixed, diff=diff, fix_notes=notes)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except (LLMError, RuntimeError) as e:
+        raise HTTPException(502, f"LLM provider error: {e}") from e
+    return out

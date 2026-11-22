@@ -86,12 +86,21 @@ def _findings(diff: str) -> list[dict]:
     return out
 
 
+def _code_from_fix_prompt(messages: list[dict]) -> str:
+    text = _first_user_text(messages)
+    body = text.split("do not include them):\n", 1)[-1]
+    return "\n".join(re.sub(r"^\s*\d+  ", "", line, count=1) for line in body.splitlines()) + "\n"
+
+
 def mock_reviewer() -> ScriptedLLM:
     def script(_call: int, messages: list[dict], tools) -> LLMResponse:
         i = sum(1 for m in messages if m["role"] == "assistant")  # step within THIS review
         diff = _diff_from_prompt(_first_user_text(messages))
         files = sorted(parse_unified_diff(diff))
         tool_names = {t.name for t in tools}
+        if tool_names == {"submit_fixed_code"}:
+            return LLMResponse(tool_calls=[ToolCall("fix", "submit_fixed_code", {
+                "code": _code_from_fix_prompt(messages), "notes": "[mock provider] no automatic fixes; use a real LLM"})])
         if i == 0 and files and "search_code" in tool_names:
             stem = re.sub(r"\W", " ", files[0].rsplit("/", 1)[-1].split(".")[0])
             return LLMResponse(tool_calls=[ToolCall("m0", "search_code", {"query": stem})])
