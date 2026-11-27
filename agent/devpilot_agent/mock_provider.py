@@ -7,6 +7,7 @@ GitHub integration end to end in CI or on a laptop. Real review quality comes fr
 """
 from __future__ import annotations
 
+import json
 import re
 
 from .diff_parser import parse_unified_diff
@@ -92,15 +93,59 @@ def _code_from_fix_prompt(messages: list[dict]) -> str:
     return "\n".join(re.sub(r"^\s*\d+  ", "", line, count=1) for line in body.splitlines()) + "\n"
 
 
+def _demo_fix(messages: list[dict]) -> tuple[str, str]:
+    # The demo only rewrites simple Java return expressions on the reviewed lines.
+    prompt = _first_user_text(messages)
+    code = _code_from_fix_prompt(messages)
+    if not prompt.splitlines()[0].lower().endswith(".java"):
+        return code, "The offline demo has no automatic fix for this finding."
+    lines = code.splitlines(keepends=True)
+    changed = False
+    for line_number in re.findall(r"^- line (\d+) \[major/bug\]", prompt.split("Current file", 1)[0], re.M):
+        index = int(line_number) - 1
+        if not 0 <= index < len(lines):
+            continue
+        # Permit a plain return statement, optionally after a one-line method header.
+        pattern = r'^(\s*(?:(?:(?:public|private|protected|static|final)\s+)*boolean\s+\w+\([^()]*\)\s*\{\s*)?return\s+)(\w+)\s*==\s*("[^"\\]*")(\s*;\s*\}?\s*)$'
+        updated, count = re.subn(pattern, r"\1\3.equals(\2)\4", lines[index])
+        if count:
+            lines[index] = updated
+            changed = True
+    return "".join(lines), ("Compare Java strings by value." if changed else
+                             "The offline demo has no automatic fix for this finding.")
+
+
+def _demo_answer(messages: list[dict]) -> str:
+    data = json.loads(_first_user_text(messages))
+    question = data["question"].lower()
+    if any(word in question for word in ("approve", "apply", "download")):
+        return "Open Preview fixes, read the diff, then select Approve and apply. Download fixed file saves a copy."
+    comments = data["review"]["comments"]
+    if not comments:
+        return "The offline reviewer reported no findings. Its rules cover a limited set of patterns."
+    line = re.search(r"\bline\s+(\d+)", question)
+    finding = next((c for c in comments if line and c["line"] == int(line.group(1))), None)
+    if line and finding is None:
+        return f"The offline reviewer has no finding on line {line.group(1)}."
+    finding = finding or next((c for c in comments if c["category"] in question), comments[0])
+    answer = f"Line {finding['line']} of {data['filename']}: {finding['body']}"
+    if finding.get("suggestion"):
+        answer += " " + finding["suggestion"]
+    return answer + " (Offline explanation of the review finding.)"
+
+
 def mock_reviewer() -> ScriptedLLM:
     def script(_call: int, messages: list[dict], tools) -> LLMResponse:
         i = sum(1 for m in messages if m["role"] == "assistant")  # step within THIS review
         diff = _diff_from_prompt(_first_user_text(messages))
         files = sorted(parse_unified_diff(diff))
         tool_names = {t.name for t in tools}
+        if tool_names == {"answer_question"}:
+            return LLMResponse(tool_calls=[ToolCall("answer", "answer_question", {"answer": _demo_answer(messages)})])
         if tool_names == {"submit_fixed_code"}:
+            code, notes = _demo_fix(messages)
             return LLMResponse(tool_calls=[ToolCall("fix", "submit_fixed_code", {
-                "code": _code_from_fix_prompt(messages), "notes": "[mock provider] no automatic fixes; use a real LLM"})])
+                "code": code, "notes": notes})])
         if i == 0 and files and "search_code" in tool_names:
             stem = re.sub(r"\W", " ", files[0].rsplit("/", 1)[-1].split(".")[0])
             return LLMResponse(tool_calls=[ToolCall("m0", "search_code", {"query": stem})])

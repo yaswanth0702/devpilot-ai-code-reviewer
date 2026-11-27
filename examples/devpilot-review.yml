@@ -1,30 +1,52 @@
-# Copy this file to .github/workflows/devpilot-review.yml in any repository.
-# Then add your Gemini key: Settings -> Secrets and variables -> Actions -> New repository secret
-#   Name: GEMINI_API_KEY
 name: DevPilot review
 
 on:
-  pull_request:
+  pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: [main]   # direct pushes get a commit comment; merges from reviewed PRs are skipped
+    branches: ['**', '!devpilot/fix-**', '!devpilot/setup-review']
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Review the current default branch or approve an existing proposal
+        type: choice
+        options: [baseline, approve]
+        required: true
+      review_run:
+        description: Review run ID (approval only)
+        type: string
+      proposal_digest:
+        description: Proposal SHA-256 from the review (approval only)
+        type: string
 
-permissions:
-  contents: write        # needed to post commit comments on direct pushes
-  pull-requests: write
+permissions: {}
 
 concurrency:
-  group: devpilot-${{ github.event.pull_request.number || github.sha }}
-  cancel-in-progress: true   # a new push cancels the review of the old commit
+  group: devpilot-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event.inputs.review_run || '' }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' }}
 
 jobs:
   review:
+    if: github.event_name != 'workflow_dispatch' || (github.event.inputs.operation == 'baseline' && github.ref_name == github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - uses: yaswanth0702/devpilot-ai-code-reviewer@main
         with:
-          provider: gemini
-          model: gemini-3.1-flash-lite
-          reasoning-effort: minimal
+          provider: ${{ secrets.GEMINI_API_KEY != '' && 'gemini' || 'mock' }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+          propose-fixes: 'true'
+
+  approve:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'approve' && github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: yaswanth0702/devpilot-ai-code-reviewer@main
