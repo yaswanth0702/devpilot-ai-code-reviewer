@@ -168,7 +168,7 @@ The full review is in [docs/paste-review-example.md](docs/paste-review-example.m
 
 ## Use DevPilot with GitHub
 
-Install the [review workflow](examples/devpilot-review.yml) in the target repository and configure its model provider. Eligible pull requests receive inline findings, and direct pushes receive a commit review. The workflow can also propose a patch for findings it can fix.
+Follow the [GitHub setup and approval guide](docs/github-approvals.md) to install the workflow. Add a Gemini Actions secret for model-backed reviews. Repositories without the secret start with the offline pattern checker. Eligible pull requests receive inline findings, and direct pushes receive a commit review. The workflow can also propose a patch for findings it can fix.
 
 To apply a proposal, inspect its `preview.diff`, then use **Actions → DevPilot review → Run workflow** on the default branch. Select the approval operation and enter the review run ID and proposal digest from the review. DevPilot checks the approving user's permissions, the reviewed commit and the patch, then opens a fix PR. Merging that PR remains a separate decision.
 
@@ -231,7 +231,7 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 | 4. Deployment | Browser service and gateway configuration | Prepared the Railway service, runtime port and health check. Verified the browser flow locally with the offline provider. [Deployment guide](docs/deployment.md) |
 | 5. Testing and debugging | Regression testing and end-to-end checks | Fixed exhausted review attempts reporting success. Checked failure handling, the Java gateway and the browser upload-to-download path using the offline provider. |
 
-Run the Python and Java suites from the repository root:
+Local verification passed **89 Python tests and 8 Java tests**, plus a signed webhook test using the running gateway, Python service and a simulated GitHub API. Browser tests exercised upload, chat, decline, approval and download. Run the suites from the repository root:
 
 ```bash
 (cd agent && python -m pytest -q)

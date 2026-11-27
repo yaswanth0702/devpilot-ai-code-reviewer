@@ -18,10 +18,13 @@ def baseline(client, base, head):
     tree = get("/git/trees/" + tree_sha, params={"recursive": 1})
     eligible = [f for f in tree["tree"] if f["type"] == "blob" and
                 f["mode"] in {"100644", "100755"} and editable(f["path"])]
-    pieces, files, chars = [], {}, 0
+    pieces, files, chars, reads = [], {}, 0, 0
     for entry in sorted(eligible, key=lambda x: x["path"]):
-        if len(files) >= 50 or entry.get("size", 0) > 50_000 - chars:
+        if len(files) >= 50 or reads >= 80:
+            break
+        if entry.get("size", 0) > 50_000 - chars:
             continue
+        reads += 1
         blob = get("/git/blobs/" + entry["sha"])
         try:
             text = base64.b64decode(blob["content"]).decode()

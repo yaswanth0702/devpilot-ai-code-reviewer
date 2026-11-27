@@ -113,6 +113,16 @@ class Approver:
         response.raise_for_status()
         return response.json()
 
+    def verify_run(self, selected, current):
+        if not re.fullmatch(r"[1-9][0-9]{0,18}", selected):
+            raise ApprovalError("Enter the review run ID from the proposal")
+        review = self.get("/actions/runs/" + selected)
+        approval = self.get("/actions/runs/" + current)
+        if (review["repository"]["full_name"] != self.repo or review["workflow_id"] != approval["workflow_id"]
+                or review["event"] not in {"pull_request_target", "pull_request", "push", "workflow_dispatch"}
+                or review["status"] != "completed" or review["conclusion"] not in {"success", "failure"}):
+            raise ApprovalError("Select a completed review from this repository's DevPilot workflow")
+
     def verify_actor(self, name):
         permission = self.get("/collaborators/" + quote(name, safe="") + "/permission")["permission"]
         if permission not in {"write", "maintain", "admin"}:

@@ -4,7 +4,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   push:
-    branches: ['**', '!devpilot/fix-**']
+    branches: ['**', '!devpilot/fix-**', '!devpilot/setup-review']
   workflow_dispatch:
     inputs:
       operation:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: yaswanth0702/devpilot-ai-code-reviewer@main
         with:
-          provider: gemini
+          provider: ${{ secrets.GEMINI_API_KEY != '' && 'gemini' || 'mock' }}
           gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
           propose-fixes: 'true'
 

@@ -138,3 +138,62 @@ def test_remote_reads_pinned_diff_and_declines_traversal_and_symlinks():
 @pytest.mark.parametrize("path", [".github/workflows/check.yml", "p/../test.py", "x#1.py", "x?y.py", "../x.py", "k/.env"])
 def test_unsupported_edits_are_excluded(path):
     assert not fixes.editable(path)
+
+
+def test_installation_merge_detected_from_commits_without_file_lists(monkeypatch):
+    from devpilot_agent import github_action as action
+    gh = Git()
+    def api(request):
+        if "/contents/" in request.url.path:
+            return httpx.Response(404 if request.url.params["ref"] == "0aa" else 200, json={})
+        if "/comments" in request.url.path:
+            assert "Baseline reviewed 2 of 2" in json.loads(request.content)["body"]
+            return httpx.Response(201)
+        return gh.api(request)
+    monkeypatch.setattr(action, "_api_client", lambda _: httpx.Client(transport=httpx.MockTransport(api)))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "o/r")
+    monkeypatch.setenv("DEVPILOT_PROVIDER", "mock")
+    assert action.review_push({"ref": "refs/heads/trunk", "repository": {"default_branch": "trunk"},
+                               "before": "0aa", "after": gh.head, "commits": [{"id": gh.head}]}, "t") == 0
+
+
+@pytest.mark.parametrize("wrong", ["workflow", "repository", "event", "status", "invalid_id"])
+def test_approval_checks_originating_run(wrong):
+    run = {"repository": {"full_name": "o/r"}, "workflow_id": 3, "event": "push", "status": "completed", "conclusion": "success"}
+    selected = dict(run)
+    if wrong == "workflow":
+        selected["workflow_id"] = 4
+    if wrong == "repository":
+        selected["repository"] = {"full_name": "someone/other"}
+    if wrong == "event":
+        selected["event"] = "issue_comment"
+    if wrong == "status":
+        selected["status"] = "in_progress"
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json=selected if r.url.path.endswith("/1") else run)))
+    service = fixes.Approver(client, "https://api", "o/r")
+    with pytest.raises(fixes.ApprovalError):
+        service.verify_run("/1" if wrong == "invalid_id" else "1", "2")
+
+
+def test_action_dispatch_applies_selected_patch_without_model(artifact, monkeypatch):
+    from devpilot_agent import github_action as action
+    gh, _, folder, digest = artifact
+    approved = folder / "devpilot-approved"
+    approved.mkdir()
+    for filename in ["preview.diff", "proposal.json"]:
+        (folder / filename).rename(approved / filename)
+    event = folder / "event.json"
+    event.write_text(json.dumps({"inputs": {"operation": "approve", "review_run": "12", "proposal_digest": digest},
+                                 "repository": {"default_branch": "trunk"}}))
+    for key, value in {"GITHUB_EVENT_NAME": "workflow_dispatch", "GITHUB_EVENT_PATH": str(event),
+                       "GITHUB_REF": "refs/heads/trunk", "GITHUB_TOKEN": "test", "GITHUB_REPOSITORY": "o/r",
+                       "GITHUB_RUN_ID": "13", "GITHUB_ACTOR": "alice", "GITHUB_TRIGGERING_ACTOR": "alice",
+                       "RUNNER_TEMP": str(folder)}.items():
+        monkeypatch.setenv(key, value)
+    def handler(request):
+        if "/actions/runs/" in request.url.path:
+            return httpx.Response(200, json={"event": "push", "repository": {"full_name": "o/r"}, "workflow_id": 3,
+                                             "status": "completed", "conclusion": "success"})
+        return gh.api(request)
+    monkeypatch.setattr(action, "_api_client", lambda _: httpx.Client(transport=httpx.MockTransport(handler)))
+    assert action.main() == 0 and gh.pr is not None

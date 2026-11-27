@@ -149,10 +149,25 @@ def review_push(event: dict, token: str, force_baseline: bool = False) -> int:
     if ref and (not ref.startswith("refs/heads/") or ref.startswith("refs/heads/devpilot/fix-")):
         return 0
     branch = ref.removeprefix("refs/heads/")
+    if branch == "devpilot/setup-review":
+        return 0
     repository = event.get("repository", {})
-    run_baseline = force_baseline or (branch and branch == repository.get("default_branch") and (
-        before == GitHubCommitRepo.ZERO or any(".github/workflows/devpilot-review.yml" in c.get("added", [])
-        for c in [*event.get("commits", []), event.get("head_commit") or {}])))
+    run_baseline = force_baseline
+    if not run_baseline and branch and branch == repository.get("default_branch"):
+        if not before or before == GitHubCommitRepo.ZERO:
+            run_baseline = True
+        else:
+            # Actions strips per-commit path lists from push payloads. Look at the
+            # actual file before and after the push, including bootstrap PR merges.
+            path = f"{GitHubRepo.API}/repos/{owner}/{repo}/contents/.github/workflows/devpilot-review.yml"
+            old = client.get(path, params={"ref": before})
+            if old.status_code == 404:
+                new = client.get(path, params={"ref": after})
+                if new.status_code != 404:
+                    new.raise_for_status()
+                    run_baseline = True
+            else:
+                old.raise_for_status()
     coverage = ""
     if run_baseline:
         target, coverage = baseline(client, f"{GitHubRepo.API}/repos/{owner}/{repo}", after)
@@ -210,6 +225,9 @@ def _run() -> int:
         if mode == "approve":
             actors = [os.environ["GITHUB_ACTOR"], os.getenv("GITHUB_TRIGGERING_ACTOR") or os.environ["GITHUB_ACTOR"]]
             service = Approver(_api_client(token), GitHubRepo.API, os.environ["GITHUB_REPOSITORY"])
+            run_id = event["inputs"].get("review_run", "")
+            current_run = os.environ["GITHUB_RUN_ID"]
+            service.verify_run(run_id, current_run)
             url = service.apply(Path(os.environ["RUNNER_TEMP"]) / "devpilot-approved",
                                 event["inputs"]["proposal_digest"], actors)
             print("Approved fix PR:", url)
@@ -224,7 +242,8 @@ def _run() -> int:
     if not pr:
         print("Not a pull_request or push event; nothing to review.")
         return 0
-    if pr.get("head", {}).get("ref", "").startswith("devpilot/fix-"):
+    source_branch = pr.get("head", {}).get("ref", "")
+    if source_branch.startswith("devpilot/fix-") or source_branch == "devpilot/setup-review":
         print("Skipping the generated fix pull request.")
         return 0
     if pr.get("draft") and os.getenv("DEVPILOT_REVIEW_DRAFTS", "false") != "true":

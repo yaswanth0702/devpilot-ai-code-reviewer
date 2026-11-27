@@ -4,7 +4,7 @@ The browser, file upload, and review chat run in the Python service. For a publi
 
 ## Railway
 
-1. Create a service from this repository. Set **Root Directory** to `/agent` and **Railway Config File** to `/agent/railway.toml`. Railway builds the Dockerfile in that directory.
+1. Create a service from this repository. Set **Root Directory** to `/agent`. Railway builds the Dockerfile in that directory. Under **Deploy**, set the health check path to `/health` and its timeout to 60 seconds.
 2. Set the service variable `DEVPILOT_PROVIDER=mock` and deploy one replica. Leave the start command empty so the image starts Uvicorn on Railway's assigned port.
 3. Generate a public domain for the service. Open `/health` on that domain and check that the response has `"status":"ok"` and `"provider":"mock"`.
 4. Open the service home page and review this snippet as `Role.java`. Inspect the proposed change, ask about the finding, then approve and download the corrected file.
