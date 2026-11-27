@@ -10,11 +10,13 @@ import pathlib
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles
 
 from .agent import ReviewAgent
+from .discussion import ChatRequest, PreviewRequest, Source, discuss
 from .llm import LLMError, make_client
 from .models import ReviewRequest, ReviewResult
+from .onboarding import router as onboarding_router
 from .repo import GitHubRepo, InMemoryRepo
 from .snippet import fix_code, review_snippet
 from .verifier import VerifierConfig
@@ -22,6 +24,8 @@ from .verifier import VerifierConfig
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(asctime)s %(levelname)s %(name)s %(message)s")
 
 app = FastAPI(title="DevPilot Agent", version="1.0.0")
+app.include_router(onboarding_router)
+app.mount("/static", StaticFiles(directory=pathlib.Path(__file__).parent / "static"), name="static")
 
 _metrics = {"reviews_total": 0, "reviews_failed": 0, "comments_posted": 0, "comments_filtered": 0, "review_seconds_sum": 0.0}
 _lock = threading.Lock()
@@ -74,9 +78,7 @@ def review(req: ReviewRequest) -> ReviewResult:
     return result
 
 
-class CheckRequest(BaseModel):
-    code: str
-    filename: str = "pasted_code"
+class CheckRequest(Source):
     fix: bool = False
 
 
@@ -89,8 +91,8 @@ def home() -> str:
 @app.post("/check")
 def check(req: CheckRequest) -> dict:
     """Review a standalone piece of code; optionally return a fixed version and the diff."""
-    agent = _agent()
     try:
+        agent = _agent()
         result = review_snippet(agent, req.code, req.filename or "pasted_code")
         out: dict = {"review": result.model_dump(mode="json"), "fixed_code": None, "diff": "", "fix_notes": ""}
         if req.fix:
@@ -101,6 +103,27 @@ def check(req: CheckRequest) -> dict:
     except (LLMError, RuntimeError) as e:
         raise HTTPException(502, _friendly(e)) from e
     return out
+
+
+@app.post("/preview")
+def preview(req: PreviewRequest) -> dict:
+    """Prepare a proposed edit for the supplied review. This does not write any file."""
+    try:
+        fixed, diff, notes = fix_code(_agent().llm, req.code, req.filename, req.review_result())
+    except (LLMError, RuntimeError) as e:
+        raise HTTPException(502, _friendly(e)) from e
+    return {"fixed_code": fixed, "diff": diff, "fix_notes": notes}
+
+
+@app.post("/chat")
+def chat(req: ChatRequest) -> dict:
+    """Discuss a review without any file or GitHub write tools."""
+    try:
+        return {"answer": discuss(_agent().llm, req)}
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from e
+    except (LLMError, RuntimeError) as e:
+        raise HTTPException(502, _friendly(e)) from e
 
 
 def _friendly(e: Exception) -> str:

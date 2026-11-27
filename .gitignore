@@ -9,3 +9,6 @@ gateway/target/
 .vscode/
 *.iml
 .DS_Store
+
+agent/build/
+agent/dist/

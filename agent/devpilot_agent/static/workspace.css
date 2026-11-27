@@ -1,0 +1,58 @@
+:root {
+  color-scheme: light dark;
+  --bg:#f3f4ee; --card:#fffefa; --text:#202a25; --soft:#526058; --line:#d1d7ce;
+  --green:#165440; --on-green:white; --field:#f7f8f3; --error:#9e282d; --add:#dcefe4; --remove:#fae5df;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg:#121815; --card:#1b221e; --text:#eaf0e9; --soft:#b0bdb3; --line:#3a4940;
+  --green:#97d4ac; --on-green:#132d20; --field:#111914; --error:#ffa999; --add:#254533; --remove:#4b302e;
+} }
+* { box-sizing:border-box }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 'Inter',system-ui,sans-serif }
+header { padding:15px max(5vw,20px); border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:center; color:var(--soft) }
+header strong { color:var(--text); font-size:18px; letter-spacing:-.04em }
+.mark { color:var(--on-green); background:var(--green); border-radius:8px; font:700 14px/30px ui-monospace,monospace; text-align:center; width:32px }
+.divider { color:var(--line) }
+main { max-width:1220px; margin:auto; padding:clamp(24px,5vw,55px) clamp(16px,4vw,45px) 60px }
+h1,h2,h3,p { margin:0 }
+h1 { font-size:clamp(30px,5vw,48px); font-weight:650; line-height:1.1; letter-spacing:-.055em }
+.intro { margin:10px 0 25px; color:var(--soft) }
+.workspace { display:grid; grid-template-columns:minmax(0,1.12fr) minmax(0,1fr); gap:16px; align-items:start }
+.panel { padding:clamp(16px,2.5vw,26px); background:var(--card); border:1px solid var(--line); border-radius:14px; min-width:0 }
+.heading { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px }
+h2 { font-size:21px; font-weight:650; letter-spacing:-.04em }
+h3 { margin-top:16px; font-size:16px }
+label { display:block; margin:10px 0 5px; font-size:13px; font-weight:650 }
+input,textarea { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:7px; color:var(--text); background:var(--field); font:inherit }
+textarea,pre { font:13px/1.6 'IBM Plex Mono',ui-monospace,monospace; tab-size:4 }
+textarea { min-height:265px; resize:vertical; white-space:pre; overflow:auto }
+.actions,form { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:12px }
+button { cursor:pointer; line-height:1.3; font-family:inherit; font-size:14px; font-weight:650; border:1px solid transparent; border-radius:7px; padding:9px 14px; color:var(--on-green); background:var(--green) }
+button.secondary { color:var(--text); background:transparent; border-color:var(--line) }
+button:hover:enabled { filter:brightness(.92) }
+button:disabled { opacity:.55; cursor:default }
+:focus-visible { outline:3px solid var(--green); outline-offset:3px }
+.status,#count,#chatHelp,#notes { font-size:13px; color:var(--soft) }
+.status { margin-top:10px; min-height:1em }
+.error { color:var(--error) }
+.finding { border-top:1px solid var(--line); padding:14px 0 }
+.finding small { color:var(--soft); font-size:12px; font-weight:700 }
+.finding p,#summary { white-space:pre-wrap; overflow-wrap:anywhere }
+.finding .suggestion { color:var(--soft); margin-top:6px }
+#summary { padding-bottom:12px }
+pre { max-height:360px; overflow:auto; margin:8px 0; background:var(--field); border:1px solid var(--line); padding:8px; border-radius:6px }
+pre span { display:block; min-height:1.5em; width:max-content; min-width:100% }
+.add { background:var(--add) }
+.remove { background:var(--remove) }
+.discussion { margin-top:16px }
+#messages { max-height:350px; overflow-y:auto }
+.turn { border-top:1px solid var(--line); margin:6px 0; padding:8px 0; white-space:pre-wrap; overflow-wrap:anywhere }
+.turn strong { display:block; font-size:13px; color:var(--soft) }
+form { flex-wrap:nowrap }
+form input { flex:1; min-width:0 }
+.visually-hidden { position:absolute; width:1px; height:1px; overflow:hidden; clip-path:inset(50%) }
+[hidden] { display:none!important }
+@media (max-width:760px) { .workspace { grid-template-columns:1fr } textarea { min-height:210px } }
+
+.fileTools { display:flex; gap:6px; flex-wrap:wrap; justify-content:flex-end }
+#provider { margin-left:auto; color:var(--soft); font-size:13px }
