@@ -9,9 +9,6 @@ import os
 import re
 from collections import Counter
 from typing import Protocol
-from urllib.parse import quote
-
-from .diff_parser import parse_unified_diff
 
 import httpx
 
@@ -55,7 +52,6 @@ class GitHubRepo:
         self._cache: dict[str, str | None] = {}
         pr = self._get(f"/repos/{owner}/{repo}/pulls/{pr_number}").json()
         self.head_sha: str = pr["head"]["sha"]
-        self.base_sha: str | None = pr.get("base", {}).get("sha")
         self._diff: str | None = None
         self._changed: list[str] | None = None
 
@@ -70,20 +66,16 @@ class GitHubRepo:
     def diff(self) -> str:
         if self._diff is None:
             self._diff = self._get(
-                (f"/repos/{self.owner}/{self.repo}/compare/{self.base_sha}...{self.head_sha}"
-                 if self.base_sha else f"/repos/{self.owner}/{self.repo}/pulls/{self.pr_number}"),
+                f"/repos/{self.owner}/{self.repo}/pulls/{self.pr_number}",
                 accept="application/vnd.github.diff",
             ).text
         return self._diff
 
     def read_file(self, path: str) -> str | None:
-        if (any(not p or p.startswith(".") for p in path.split("/"))
-                or any(ord(c) < 32 for c in path) or path not in self.list_files()):
-            return None
         if path not in self._cache:
             try:
                 self._cache[path] = self._get(
-                    f"/repos/{self.owner}/{self.repo}/contents/{quote(path, safe='/')}?ref={self.head_sha}",
+                    f"/repos/{self.owner}/{self.repo}/contents/{path}?ref={self.head_sha}",
                     accept="application/vnd.github.raw+json",
                 ).text
             except httpx.HTTPStatusError:
@@ -92,19 +84,9 @@ class GitHubRepo:
 
     def list_files(self) -> list[str]:
         if self._changed is None:
-            self._changed = self._regular_changed_files()
+            files = self._get(f"/repos/{self.owner}/{self.repo}/pulls/{self.pr_number}/files?per_page=100").json()
+            self._changed = [f["filename"] for f in files]
         return self._changed
-
-
-    def _regular_changed_files(self) -> list[str]:
-        # Do not follow a changed symlink or submodule into unrelated repository content.
-        changed = []
-        for section in re.split(r"(?m)^diff --git ", self.diff()):
-            metadata = section.split("\n@@", 1)[0]
-            if re.search(r"(?m)^(?:new (?:file )?mode |index [^\n]+ )(?:120000|160000)$", metadata):
-                continue
-            changed.extend(parse_unified_diff(section))
-        return changed
 
 
 class GitHubCommitRepo(GitHubRepo):
@@ -141,7 +123,8 @@ class GitHubCommitRepo(GitHubRepo):
 
     def list_files(self) -> list[str]:
         if self._changed is None:
-            self._changed = self._regular_changed_files()
+            data = self._get(self._compare_path()).json()
+            self._changed = [f["filename"] for f in data.get("files", []) if f.get("status") != "removed"]
         return self._changed
 
 

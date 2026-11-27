@@ -7,7 +7,7 @@ import time
 from pydantic import ValidationError
 
 from .diff_parser import parse_unified_diff
-from .llm import LLMClient, LLMError
+from .llm import LLMClient
 from .models import ReviewComment, ReviewResult
 from .repo import Repo
 from .tools import ALL_TOOLS, SUBMIT_REVIEW, ToolExecutor
@@ -32,10 +32,6 @@ How to work:
 """
 
 MAX_DIFF_CHARS = 60_000
-
-
-class IncompleteReviewError(LLMError):
-    """The reviewer did not submit a usable final result within its budget."""
 
 
 class ReviewAgent:
@@ -64,7 +60,7 @@ class ReviewAgent:
         ]
 
         steps = tool_calls = in_tok = out_tok = 0
-        submission = None
+        submission: dict | None = None
 
         while steps < self.max_steps and submission is None:
             last_step = steps == self.max_steps - 1
@@ -86,26 +82,17 @@ class ReviewAgent:
             for call in resp.tool_calls:
                 tool_calls += 1
                 if call.name == SUBMIT_REVIEW.name:
-                    if submission is None:
-                        submission = _parse_submission(call.input)
-                    received = submission is not None
-                    results.append({
-                        "type": "tool_result", "tool_use_id": call.id, "is_error": not received,
-                        "content": "review received" if received else
-                        "Submit a non-empty summary and a list of valid comments. Use [] for a clean review.",
-                    })
+                    submission = call.input
+                    results.append({"type": "tool_result", "tool_use_id": call.id, "content": "review received"})
                     continue
                 output, is_error = executor.run(call.name, call.input)
                 log.debug("tool %s(%s) -> %d chars", call.name, call.input, len(output))
                 results.append({"type": "tool_result", "tool_use_id": call.id, "content": output, "is_error": is_error})
             messages.append({"role": "user", "content": results})
 
-        if submission is None:
-            raise IncompleteReviewError(
-                f"Review incomplete: the model did not submit a valid final review within {self.max_steps} steps."
-            )
-        summary, raw_comments, parse_drops = submission
+        raw_comments, parse_drops = _parse_comments((submission or {}).get("comments", []))
         kept, dropped = verify(raw_comments, parsed, self.verifier_cfg)
+        summary = (submission or {}).get("summary") or "DevPilot could not complete the review within its step budget."
         log.info(
             "review done steps=%d tools=%d kept=%d dropped=%d %.1fs",
             steps, tool_calls, len(kept), len(dropped) + parse_drops, time.monotonic() - started,
@@ -121,23 +108,14 @@ class ReviewAgent:
         )
 
 
-def _parse_submission(payload: dict) -> tuple[str, list[ReviewComment], int] | None:
-    if not isinstance(payload, dict):
-        return None
-    summary, raw = payload.get("summary"), payload.get("comments")
-    if not isinstance(summary, str) or not summary.strip() or not isinstance(raw, list):
-        return None
-
-    valid: list[ReviewComment] = []
-    for item in raw:
+def _parse_comments(raw: list) -> tuple[list[ReviewComment], int]:
+    out, bad = [], 0
+    for item in raw if isinstance(raw, list) else []:
         try:
-            valid.append(ReviewComment.model_validate(item))
+            out.append(ReviewComment.model_validate(item))
         except ValidationError:
-            continue
-    # Distinguish an explicit clean review from a payload containing only invalid findings.
-    if raw and not valid:
-        return None
-    return summary.strip(), valid, len(raw) - len(valid)
+            bad += 1  # malformed model output is dropped, never crashes the review
+    return out, bad
 
 
 def _merge_consecutive_user(messages: list[dict]) -> list[dict]:

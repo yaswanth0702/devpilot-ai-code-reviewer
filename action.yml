@@ -27,9 +27,6 @@ inputs:
   github-token:
     description: Token used to read the PR and post the review
     default: ${{ github.token }}
-  propose-fixes:
-    description: Produce a downloadable patch for explicit maintainer approval
-    default: "false"
   min-confidence:
     description: Drop comments below this confidence (0-1)
     default: "0.5"
@@ -49,20 +46,10 @@ runs:
     - name: Install DevPilot
       shell: bash
       run: pip install --quiet "${{ github.action_path }}/agent"
-    - name: Download the selected review proposal
-      if: github.event_name == 'workflow_dispatch' && github.event.inputs.operation == 'approve'
-      uses: actions/download-artifact@v4
-      with:
-        name: devpilot-proposal
-        path: ${{ runner.temp }}/devpilot-approved
-        github-token: ${{ inputs.github-token }}
-        run-id: ${{ github.event.inputs.review_run }}
-    - name: Run DevPilot
-      id: review
+    - name: Review pull request
       shell: bash
       env:
         GITHUB_TOKEN: ${{ inputs.github-token }}
-        DEVPILOT_PROPOSE_FIXES: ${{ inputs.propose-fixes }}
         DEVPILOT_PROVIDER: ${{ inputs.provider }}
         DEVPILOT_MODEL: ${{ inputs.model }}
         DEVPILOT_REASONING_EFFORT: ${{ inputs.reasoning-effort }}
@@ -74,12 +61,3 @@ runs:
         ANTHROPIC_API_KEY: ${{ inputs.anthropic-api-key }}
         OPENAI_API_KEY: ${{ inputs.openai-api-key }}
       run: python -m devpilot_agent.github_action
-    - name: Save exact proposed edits and their preview
-      if: always() && steps.review.outputs.has_proposal == 'true'
-      uses: actions/upload-artifact@v4
-      with:
-        name: devpilot-proposal
-        path: ${{ runner.temp }}/devpilot-proposal/
-        retention-days: 7
-        if-no-files-found: error
-        overwrite: true

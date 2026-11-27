@@ -70,17 +70,12 @@ def fix_code(llm: LLMClient, code: str, filename: str, review: ReviewResult) -> 
     call = next((c for c in resp.tool_calls if c.name == SUBMIT_FIXED_CODE.name), None)
     if call is None or not isinstance(call.input.get("code"), str) or not call.input["code"].strip():
         raise RuntimeError("the model did not return fixed code")
-    # Keep the reviewed file's line endings and final newline for unchanged surrounding code.
-    fixed = call.input["code"].replace("\r\n", "\n")
-    if code.endswith("\n") and not fixed.endswith("\n"):
+    fixed = call.input["code"]
+    if not fixed.endswith("\n"):
         fixed += "\n"
-    elif not code.endswith("\n") and fixed.endswith("\n"):
-        fixed = fixed[:-1]
-    if fixed == code.replace("\r\n", "\n"):
-        return code, "", call.input.get("notes", "")
-    if "\r\n" in code and "\n" not in code.replace("\r\n", ""):
-        fixed = fixed.replace("\n", "\r\n")
-    lines = difflib.unified_diff(code.splitlines(keepends=True), fixed.splitlines(keepends=True),
-                                 fromfile=f"{filename} (original)", tofile=f"{filename} (fixed)")
-    diff = "".join(line if line.endswith("\n") else line + "\n\\ No newline at end of file\n" for line in lines)
+    original = code if code.endswith("\n") else code + "\n"
+    diff = "".join(difflib.unified_diff(
+        original.splitlines(keepends=True), fixed.splitlines(keepends=True),
+        fromfile=f"{filename} (original)", tofile=f"{filename} (fixed)",
+    ))
     return fixed, diff, call.input.get("notes", "")

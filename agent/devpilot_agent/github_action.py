@@ -12,13 +12,10 @@ import json
 import logging
 import os
 import sys
-from pathlib import Path
 
 import httpx
 
-from .agent import IncompleteReviewError, ReviewAgent
-from .github_baseline import baseline
-from .github_fixes import Approver, ApprovalError, approval_note
+from .agent import ReviewAgent
 from .diff_parser import filter_code_diff
 from .llm import make_client
 from .models import ReviewComment, ReviewResult
@@ -48,13 +45,13 @@ def format_summary(r: ReviewResult, model: str) -> str:
 
 
 def post_review(client: httpx.Client, api: str, owner: str, repo: str, pr: int, head_sha: str,
-                result: ReviewResult, model: str, note: str = "") -> str:
+                result: ReviewResult, model: str) -> str:
     """Post inline comments; if GitHub rejects a line (422), fall back to listing them in the body."""
     url = f"{api}/repos/{owner}/{repo}/pulls/{pr}/reviews"
     body = {
         "commit_id": head_sha,
         "event": "COMMENT",  # never approve or block: a human stays in charge
-        "body": format_summary(result, model) + note,
+        "body": format_summary(result, model),
         "comments": [{"path": c.path, "line": c.line, "side": "RIGHT", "body": format_comment(c)} for c in result.comments],
     }
     r = client.post(url, json=body)
@@ -137,7 +134,7 @@ def _finish(result: ReviewResult, model: str) -> int:
     return 0
 
 
-def review_push(event: dict, token: str, force_baseline: bool = False) -> int:
+def review_push(event: dict, token: str) -> int:
     after, before = event.get("after"), event.get("before")
     if event.get("deleted") or not after or after == GitHubCommitRepo.ZERO:
         print("Branch deleted; nothing to review.")
@@ -145,69 +142,29 @@ def review_push(event: dict, token: str, force_baseline: bool = False) -> int:
     owner, repo = os.environ["GITHUB_REPOSITORY"].split("/", 1)
     client = _api_client(token)
 
-    ref = event.get("ref", "")
-    if ref and (not ref.startswith("refs/heads/") or ref.startswith("refs/heads/devpilot/fix-")):
+    # Code that arrived through a merged pull request was already reviewed on the PR.
+    pulls = client.get(f"{GitHubRepo.API}/repos/{owner}/{repo}/commits/{after}/pulls")
+    if pulls.status_code == 200 and any(p.get("merged_at") for p in pulls.json()):
+        print("Push comes from a merged pull request that was already reviewed; skipping.")
         return 0
-    branch = ref.removeprefix("refs/heads/")
-    if branch == "devpilot/setup-review":
+
+    target, _ = _code_only(GitHubCommitRepo(owner, repo, before, after, token))
+    if target is None:
         return 0
-    repository = event.get("repository", {})
-    run_baseline = force_baseline
-    if not run_baseline and branch and branch == repository.get("default_branch"):
-        if not before or before == GitHubCommitRepo.ZERO:
-            run_baseline = True
-        else:
-            # Actions strips per-commit path lists from push payloads. Look at the
-            # actual file before and after the push, including bootstrap PR merges.
-            path = f"{GitHubRepo.API}/repos/{owner}/{repo}/contents/.github/workflows/devpilot-review.yml"
-            old = client.get(path, params={"ref": before})
-            if old.status_code == 404:
-                new = client.get(path, params={"ref": after})
-                if new.status_code != 404:
-                    new.raise_for_status()
-                    run_baseline = True
-            else:
-                old.raise_for_status()
-    coverage = ""
-    if run_baseline:
-        target, coverage = baseline(client, f"{GitHubRepo.API}/repos/{owner}/{repo}", after)
-        if not target.diff().strip():
-            print(coverage)
-            return 0
-    else:
-        # A merged PR has its own review. The installation commit still needs a first baseline.
-        pulls = client.get(f"{GitHubRepo.API}/repos/{owner}/{repo}/commits/{after}/pulls")
-        if pulls.status_code == 200 and any(p.get("merged_at") for p in pulls.json()):
-            print("Push comes from a merged pull request that was already reviewed; skipping.")
-            return 0
-        target, _ = _code_only(GitHubCommitRepo(owner, repo, before, after, token))
-        if target is None:
-            return 0
     agent, provider, model = _make_agent()
     print(f"DevPilot reviewing push {before[:7] if before else '(new)'}..{after[:7]} on {owner}/{repo} with {provider} ({model})")
     result = agent.review(target)
     print(f"{len(result.comments)} comment(s), {len(result.dropped)} filtered, {result.tool_calls} tool calls")
 
-    if coverage:
-        result.summary = coverage + "\n\n" + result.summary
-    note = approval_note(None, after, branch, target, agent, result)
     server = os.getenv("GITHUB_SERVER_URL", "https://github.com")
     r = client.post(f"{GitHubRepo.API}/repos/{owner}/{repo}/commits/{after}/comments",
-                    json={"body": format_commit_comment(result, model, server, owner, repo, after) + note})
+                    json={"body": format_commit_comment(result, model, server, owner, repo, after)})
     r.raise_for_status()
     print("Review posted as a commit comment.")
     return _finish(result, model)
 
 
 def main() -> int:
-    try:
-        return _run()
-    except IncompleteReviewError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
-
-def _run() -> int:
     logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format="%(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
@@ -217,34 +174,11 @@ def _run() -> int:
         print("GITHUB_EVENT_PATH and GITHUB_TOKEN are required (run inside GitHub Actions).", file=sys.stderr)
         return 2
     event = json.load(open(event_path))
-    if os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        mode = event["inputs"].get("operation", "baseline")
-        default = event["repository"]["default_branch"]
-        if os.environ["GITHUB_REF"] != "refs/heads/" + default:
-            raise ApprovalError("Select the repository's default branch to run DevPilot manually")
-        if mode == "approve":
-            actors = [os.environ["GITHUB_ACTOR"], os.getenv("GITHUB_TRIGGERING_ACTOR") or os.environ["GITHUB_ACTOR"]]
-            service = Approver(_api_client(token), GitHubRepo.API, os.environ["GITHUB_REPOSITORY"])
-            run_id = event["inputs"].get("review_run", "")
-            current_run = os.environ["GITHUB_RUN_ID"]
-            service.verify_run(run_id, current_run)
-            url = service.apply(Path(os.environ["RUNNER_TEMP"]) / "devpilot-approved",
-                                event["inputs"]["proposal_digest"], actors)
-            print("Approved fix PR:", url)
-            return 0
-        if mode != "baseline":
-            raise ApprovalError("Unknown manual operation")
-        return review_push({"after": os.environ["GITHUB_SHA"], "ref": os.environ["GITHUB_REF"],
-                            "repository": event["repository"]}, token, force_baseline=True)
     if os.getenv("GITHUB_EVENT_NAME") == "push" or ("after" in event and "pull_request" not in event):
         return review_push(event, token)
     pr = event.get("pull_request")
     if not pr:
         print("Not a pull_request or push event; nothing to review.")
-        return 0
-    source_branch = pr.get("head", {}).get("ref", "")
-    if source_branch.startswith("devpilot/fix-") or source_branch == "devpilot/setup-review":
-        print("Skipping the generated fix pull request.")
         return 0
     if pr.get("draft") and os.getenv("DEVPILOT_REVIEW_DRAFTS", "false") != "true":
         print("Draft PR; skipping.")
@@ -261,14 +195,7 @@ def _run() -> int:
     result = agent.review(target)
     print(f"{len(result.comments)} comment(s), {len(result.dropped)} filtered, {result.tool_calls} tool calls")
 
-    client = _api_client(token)
-    head = pr.get("head", {})
-    if head and (head["sha"] != gh.head_sha or
-                 client.get(f"{GitHubRepo.API}/repos/{owner}/{repo}/pulls/{number}").raise_for_status().json()["head"]["sha"] != gh.head_sha):
-        print("The PR changed while this review was running; skipping this superseded revision.")
-        return 0
-    note = approval_note(pr, gh.head_sha, head.get("ref"), target, agent, result)
-    mode = post_review(client, GitHubRepo.API, owner, repo, number, gh.head_sha, result, model, note)
+    mode = post_review(_api_client(token), GitHubRepo.API, owner, repo, number, gh.head_sha, result, model)
     print(f"Review posted ({mode} comments).")
     return _finish(result, model)
 

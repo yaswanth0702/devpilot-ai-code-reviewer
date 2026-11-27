@@ -1,36 +1,90 @@
 # DevPilot: AI Code Review Agent
 
-DevPilot reviews changed code, explains suspected bugs, and prepares a diff you can approve. Use the browser for a single source file, the CLI for a local working copy, or GitHub Actions for pull requests and pushes.
+DevPilot is an LLM agent that reviews code like a senior engineer. It reads the change,
+**investigates the surrounding code with tools** (file reads, BM25 code search), and reports
+specific, line-level problems: bugs, security holes, concurrency issues, broken error handling
+and performance traps. Each problem comes with a concrete fix, and DevPilot can also write the
+fixed version of the code for you to check.
 
-| Where you work | How to review | What approval does |
+It works with Gemini, Claude and GPT, and with self-hosted models through any OpenAI-compatible
+API. It runs four ways:
+
+| Mode | How you use it | Needs GitHub? |
 |---|---|---|
-| Browser | Paste code or open a UTF-8 source file. Review the findings and ask follow-up questions. | Applies the displayed change in the editor, then lets you download the corrected file. |
-| Terminal | Run `devpilot review` for a Git diff or `devpilot check FILE --apply` for one file. | Typing `yes` at the file prompt replaces the reviewed source file after a fresh content check. |
-| GitHub Actions | A configured workflow reviews changed lines and posts findings. When an edit is available, the review links to its patch. | A repository writer approves the identified proposal and DevPilot opens a fix pull request for the reviewed branch. |
-| Self-hosted Java gateway | A signed GitHub pull request webhook queues a review in the database. | This integration posts review comments. Use the Actions workflow for approved fix PRs. |
+| **Local mode** | `devpilot review` in any git repo; results print in your terminal. It can also run as a pre-push hook. | No |
+| **Paste / single file** | `devpilot web` page or `devpilot check file.py --fix`: review any code and get a fixed version. | No |
+| **GitHub Action** | Add one workflow file; GitHub runs DevPilot on every PR and it posts inline comments. | Yes, nothing to host |
+| **Self-hosted server** | Spring Boot gateway receives webhooks, queues reviews and posts comments. | Yes |
 
-Gemini, Claude, GPT and OpenAI-compatible services can power reviews. The offline demo recognizes a small set of patterns and lets you try the approval flow without an API key.
+Every comment passes through a **verifier guardrail** before you see it. The guardrail removes
+hallucinated files, comments on lines the PR didn't touch, low-confidence guesses, duplicates and nits.
+
+**Highlights**
+
+- Found **10 of 11** planted bugs on a seeded-bug benchmark, against 3 of 11 for a regex baseline
+  (recall 0.91, F1 0.83, Gemini Flash-Lite). See [Results](#results).
+- **Live on GitHub:** this repo reviews its own pull requests and pushes. See
+  [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) for a real review.
+- **Paste-and-fix:** caught all 3 bugs in a Java class and produced a minimal, correct fix
+  ([example](docs/paste-review-example.md)).
+- **Tested:** 40 Python tests and 8 Java tests run in CI on Python 3.10 and 3.12.
 
 ---
 
 ## Architecture
 
-The Python agent turns source changes into a diff, reads relevant files, searches for context, and returns line-level findings. Its verifier checks the location, confidence and duplication of those findings. The browser, CLI and GitHub workflow share this review logic. The optional Java gateway handles signed webhooks, queueing and retries.
+```mermaid
+flowchart LR
+    subgraph GitHub
+      PR[Pull request opened / pushed]
+      RV[Inline review comments]
+    end
 
-Read the [architecture and approval flow](docs/architecture.md) for the boundaries between reviewing code, proposing an edit and publishing a fix.
+    subgraph Gateway["Gateway · Java 21 / Spring Boot"]
+      WH[Webhook endpoint<br/>HMAC-SHA256 verification<br/>idempotent by delivery id]
+      Q[(Postgres job queue<br/>retries + backoff<br/>supersedes stale commits)]
+      W[Review worker<br/>optimistic-lock claiming]
+    end
+
+    subgraph Agent["Agent service · Python / FastAPI"]
+      L[Tool-use loop<br/>bounded steps]
+      T[Tools: read_file,<br/>search_code BM25]
+      V[Verifier guardrail]
+    end
+
+    LLM[(LLM provider<br/>Gemini / Claude / GPT /<br/>OpenAI-compatible)]
+    CLI[devpilot CLI<br/>review · check · web]
+    GA[GitHub Action<br/>runs on GitHub]
+
+    PR -- webhook --> WH --> Q --> W -- POST /review --> L
+    PR -- workflow --> GA --> L
+    L <--> LLM
+    L <--> T
+    L --> V --> W -- review API --> RV
+    V --> GA -- review API --> RV
+    CLI --> L
+```
+
+All entry points (CLI, paste page, GitHub Action, self-hosted gateway) share the same agent loop
+and verifier, so a review behaves the same wherever it runs.
+
+**Why two services in self-hosted mode?** The gateway handles the parts that need to be reliable: signature checks,
+durable queueing, retries, idempotency and the GitHub API. The agent handles the parts that keep
+changing: prompts, tools and model providers. Either one can be deployed or scaled on its own.
 
 ### Design decisions
 
 - **Async webhook handling.** A review takes 30–90 seconds with a real LLM, but GitHub times out
   webhooks after 10 seconds. The endpoint therefore only verifies and enqueues the job, then
   returns `202 Accepted`. A worker does the review.
-- **The database is the queue.** Queued jobs survive restarts. Several gateway instances can poll safely
+- **The database is the queue.** Jobs survive restarts. Several gateway instances can poll safely
   because a JPA `@Version` optimistic lock decides which instance claims a job. Failed jobs retry
   with exponential backoff up to `max-attempts`, then are marked `FAILED` with the error.
 - **Idempotent and supersedes stale work.** Duplicate deliveries (same `X-GitHub-Delivery`) are
   ignored. A new push to a PR marks older queued reviews of that PR `SUPERSEDED`, so no model
   calls are spent on outdated commits.
-- **Bounded agent.** The loop is capped at `max_steps`. On the last step the model can submit its review. If it exhausts the budget without a valid submission, DevPilot reports an incomplete review.
+- **Bounded agent.** The loop is capped at `max_steps`. On the last step only `submit_review` is
+  offered, so a review always finishes. Malformed model output is dropped and never crashes a run.
 - **Verifier guardrail.** The verifier applies hard rules after the model, and each dropped
   comment is recorded with its reason:
   - the file must be in the diff
@@ -49,7 +103,7 @@ Read the [architecture and approval flow](docs/architecture.md) for the boundari
 
 ## Quick start
 
-Requirements: Python 3.10+ and git. For a model-backed review, supply an API key: a Gemini key from
+Requirements: Python 3.10+ and git. You also need an API key: a Gemini key from
 [Google AI Studio](https://aistudio.google.com/apikey) (it starts with `AIza`), an Anthropic key or
 an OpenAI key.
 
@@ -104,32 +158,20 @@ Example output: see [docs/local-mode-output.txt](docs/local-mode-output.txt).
 
 ## Paste code or check a single file
 
-To try the browser workspace locally, install the Python service and start the offline provider:
+No git and no pull request are needed: paste any code, or point DevPilot at one file, and you get
+a review back. Add `--fix` and DevPilot also writes a **fixed version** and shows exactly what
+changed as a diff. Your original file is never modified.
 
+**In the browser:**
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install ./agent
-devpilot web --provider mock
+devpilot web --provider gemini     # opens http://127.0.0.1:8000
 ```
-
-Open the page printed in the terminal. Paste the snippet below or upload it as `Role.java`, then review it. Ask the chatbot why the comparison can fail. Preview the fix, approve it in the editor and download the result. Editing the source requires a fresh review.
-
-```java
-class Role {
-    boolean isAdmin(String role) {
-        return role == "admin";
-    }
-}
-```
-
-The offline demo can propose `"admin".equals(role)` for this example. For general review and open-ended discussion, select a configured model with `devpilot web --provider gemini`. Code sent for review or chat goes to that provider. See the [deployment guide](docs/deployment.md) to host the browser workspace.
+Paste your code, click **Review code**, then copy the fixed code if you want it.
 
 **In the terminal:**
 ```bash
 devpilot check src/app.py --provider gemini                 # review one file
-devpilot check src/app.py --provider gemini --apply         # show diff, ask, then update this file
-devpilot check src/app.py --provider gemini --fix           # show suggested changes as a diff
+devpilot check src/app.py --provider gemini --fix           # + suggested changes as a diff
 devpilot check src/app.py --provider gemini --fix --write   # + save to src/app.fixed.py
 pbpaste | devpilot check --name app.py --provider gemini --fix   # review whatever you copied (macOS)
 ```
@@ -166,15 +208,71 @@ The full review is in [docs/paste-review-example.md](docs/paste-review-example.m
 
 ---
 
-## Use DevPilot with GitHub
+## Run it on GitHub (GitHub Action), the easiest way
 
-Follow the [GitHub setup and approval guide](docs/github-approvals.md) to install the workflow. Add a Gemini Actions secret for model-backed reviews. Repositories without the secret start with the offline pattern checker. Eligible pull requests receive inline findings, and direct pushes receive a commit review. The workflow can also propose a patch for findings it can fix.
+DevPilot runs on GitHub's own servers: every pull request gets reviewed automatically, with inline
+comments on the changed lines. There's no server to host and nothing to install.
 
-To apply a proposal, inspect its `preview.diff`, then use **Actions → DevPilot review → Run workflow** on the default branch. Select the approval operation and enter the review run ID and proposal digest from the review. DevPilot checks the approving user's permissions, the reviewed commit and the patch, then opens a fix PR. Merging that PR remains a separate decision.
+**Set up any of your repositories in two steps:**
 
-For new repositories, configure the onboarding webhook once for the owner or organization you want covered. It can propose the workflow in a setup PR after the default branch exists. Empty repositories have no code to review. Installation instructions and event coverage are in the [architecture guide](docs/architecture.md).
+1. Add your API key as a secret in the repo you want reviewed: **Settings → Secrets and variables →
+   Actions → New repository secret**, name `GEMINI_API_KEY`. Or, from a terminal with the GitHub CLI:
+   `gh secret set GEMINI_API_KEY --repo <owner>/<repo>`.
+2. Copy [`examples/devpilot-review.yml`](examples/devpilot-review.yml) into that repo as
+   `.github/workflows/devpilot-review.yml`:
 
-[Example of an earlier inline review](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1)
+```yaml
+name: DevPilot review
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+permissions:
+  contents: write          # commit comments on direct pushes
+  pull-requests: write
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: yaswanth0702/devpilot-ai-code-reviewer@main
+        with:
+          provider: gemini                 # or anthropic / openai
+          model: gemini-3.1-flash-lite
+          reasoning-effort: minimal
+          gemini-api-key: ${{ secrets.GEMINI_API_KEY }}
+```
+
+**When it runs:**
+
+| Event | What DevPilot does |
+|---|---|
+| PR opened, reopened, marked ready, or new commits pushed to it | Posts a review with inline comments on the changed lines |
+| Direct push to `main` (no PR) | Reviews the pushed commits and posts a **commit comment** listing issues with links to the lines |
+| Merging a PR into `main` | Skipped, because the code was already reviewed on the PR |
+| Draft PRs, PRs from forks | Skipped |
+| Changes that touch only non-code files (docs, images, lock files, data) | Skipped; no API calls are made |
+
+**Live examples in this repo:**
+- [PR #1](https://github.com/yaswanth0702/devpilot-ai-code-reviewer/pull/1) is a demo PR with three planted
+  bugs. DevPilot flagged the SQL injection (critical) and the bare `except` (major), each with a
+  suggested fix. It missed the N+1 query.
+- Direct pushes to `main` were verified with three real pushes. A code-only push was reviewed with a
+  commit comment, a docs-only push was skipped with no API calls, and a push that mixed code and
+  docs was reviewed.
+
+On a PR, DevPilot posts one review: a summary, plus inline comments with suggested fixes.
+If GitHub rejects a comment's line, DevPilot lists that comment in the review summary instead.
+It always posts as `COMMENT` and never approves or blocks a PR. You can opt in with
+`fail-on-critical: "true"` to fail the check when a critical issue is found. This repo reviews
+its own PRs with the same action ([workflow](.github/workflows/devpilot-review.yml)).
+
+Inputs: `provider`, `model`, `reasoning-effort`, `gemini-api-key` / `anthropic-api-key` /
+`openai-api-key`, `min-confidence` (default `0.5`), `review-files` (`code` by default; `all` to include
+docs and other files) and `fail-on-critical` (default `false`). Code files are source files
+(`.py`, `.java`, `.ts`, `.go`, `.sql`, …), infrastructure and config (`.tf`, `.yml`, `Dockerfile`,
+`pom.xml`) and build scripts.
+PRs from forks don't receive repository secrets, so they are not reviewed.
 
 ---
 
@@ -221,21 +319,16 @@ Recorded output: [docs/e2e-demo-output.txt](docs/e2e-demo-output.txt).
 
 ## Results
 
-### Agent contributions and verification
+### Tests
 
-| Agent | Responsibility | Delivered and checked |
+| Component | Tests | What they cover |
 |---|---|---|
-| 1. Architecture | Review and approval design, new repository setup | Documented the approval boundaries and implemented a signed GitHub webhook that offers a setup PR. Tests cover an empty repository, first push, duplicate deliveries and installation-token scope. |
-| 2. Browser development | File upload, review chat and patch approval | Built the browser workspace, added contextual follow-up questions and a working offline example. Verified decline, approval and download in Chromium, including UTF-8 files with a byte order mark and Windows line endings. |
-| 3. GitHub development | PR and push reviews, initial scans and approved fix PRs | Added patch artifacts, permission checks, revision checks and a separate fix PR. Tests exercise these operations with simulated GitHub responses. |
-| 4. Deployment | Browser service and gateway configuration | Prepared the Railway service, runtime port and health check. Verified the browser flow locally with the offline provider. [Deployment guide](docs/deployment.md) |
-| 5. Testing and debugging | Regression testing and end-to-end checks | Fixed exhausted review attempts reporting success. Checked failure handling, the Java gateway and the browser upload-to-download path using the offline provider. |
-
-Local verification passed **89 Python tests and 8 Java tests**, plus a signed webhook test using the running gateway, Python service and a simulated GitHub API. Browser tests exercised upload, chat, decline, approval and download. Run the suites from the repository root:
+| Agent (pytest) | 40 passing | clear error for rejected API keys, paste/single-file review and fix-with-diff (CLI, API, web page), GitHub Action mode end to end against a fake GitHub API (PR inline reviews, direct-push commit comments, skipping merged PRs and docs-only changes, code-file filtering, line fallback, drafts, fail-on-critical), OpenAI/Gemini adapter against a fake HTTP server (including thought-signature round trip), diff parsing (multi-hunk, new and deleted files), every verifier rule, the tool-use loop feeding results back, step-budget enforcement, role alternation, unknown tools, API endpoints, CLI local mode on a real git repo, eval scoring |
+| Gateway (JUnit + MockMvc) | 8 passing | HMAC check against GitHub's documented test vector, bad signature → 401, ping, ignored actions and draft PRs, duplicate deliveries, superseding stale commits, worker posts review to GitHub, retry → permanent failure after 3 attempts, review API |
 
 ```bash
-(cd agent && python -m pytest -q)
-(cd gateway && mvn test)
+cd agent && pytest -q          # 40 passed
+cd gateway && mvn test         # Tests run: 8, Failures: 0, Errors: 0
 ```
 
 CI runs the agent tests on Python 3.10 and 3.12, plus the gateway tests and the offline benchmark, on
@@ -351,7 +444,7 @@ agent/                      Python agent service + CLI
     app.py                  FastAPI: /review, /check, paste page at /, /health, /metrics
     cli.py                  `devpilot review`, `check` (single file / paste), `web`
     snippet.py              review pasted code and produce a fixed version + diff
-    static/                 browser workspace, file selection, diff approval, review chat
+    static/index.html       paste-your-code web page
     github_action.py        GitHub Action mode: PR reviews and direct-push commit comments
   evals/                    seeded-bug benchmark + runner + results
   tests/
@@ -379,8 +472,7 @@ docker-compose.yml
 - [ ] Run the benchmark against Claude, GPT and larger Gemini models and compare cost and latency per review
 - [ ] Embedding-based code search alongside BM25 (hybrid retrieval)
 - [ ] Re-review only new commits on `synchronize`, and resolve comments that were fixed
-- [x] GitHub App installation tokens for new repository onboarding
-- [ ] Installation tokens for the optional Java PR review gateway
+- [ ] GitHub App authentication (installation tokens) instead of a personal access token
 - [ ] Run the project's tests in a sandbox as an agent tool
 - [ ] Deploy to AWS (ECS Fargate + RDS) with Terraform
 

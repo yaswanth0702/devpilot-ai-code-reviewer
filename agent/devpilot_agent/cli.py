@@ -5,10 +5,9 @@ import argparse
 import json
 import logging
 import os
-from pathlib import Path
 import sys
 
-from .agent import IncompleteReviewError, ReviewAgent
+from .agent import ReviewAgent
 from .llm import make_client
 from .models import ReviewResult, Severity
 from .repo import LocalGitRepo
@@ -35,14 +34,6 @@ def render_text(r: ReviewResult) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    try:
-        return _run(argv)
-    except IncompleteReviewError as exc:
-        print(str(exc), file=sys.stderr)
-        return 2
-
-
-def _run(argv: list[str] | None) -> int:
     p = argparse.ArgumentParser(prog="devpilot", description="AI code review for your local git changes")
     sub = p.add_subparsers(dest="cmd", required=True)
     r = sub.add_parser("review", help="review changes in a git repo")
@@ -61,9 +52,7 @@ def _run(argv: list[str] | None) -> int:
     c.add_argument("file", nargs="?", default="-", help="file to review, or - to read pasted code from stdin (default)")
     c.add_argument("--name", help="file name for pasted code, e.g. app.py (helps detect the language)")
     c.add_argument("--fix", action="store_true", help="also produce a fixed version and show the changes")
-    output = c.add_mutually_exclusive_group()
-    output.add_argument("--apply", action="store_true", help="preview a fix and ask before replacing the source file")
-    output.add_argument("--write", action="store_true", help="with --fix: save the fixed code next to the file as <name>.fixed<ext>")
+    c.add_argument("--write", action="store_true", help="with --fix: save the fixed code next to the file as <name>.fixed<ext>")
     c.add_argument("--provider", default=os.getenv("DEVPILOT_PROVIDER", "anthropic"), choices=["anthropic", "openai", "gemini", "mock"])
     c.add_argument("--model", default=None)
     c.add_argument("--format", default="text", choices=["text", "json"])
@@ -105,24 +94,19 @@ def _run(argv: list[str] | None) -> int:
 
 
 def _check(args) -> int:
+    import pathlib
+
     from .snippet import fix_code, review_snippet
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.WARNING, format="%(name)s %(message)s")
-    if args.apply and (args.file == "-" or args.format != "text"):
-        print("--apply needs a source file and text output for confirmation.", file=sys.stderr)
-        return 2
     if args.file == "-":
         if sys.stdin.isatty():
             print("Paste your code, then press Ctrl+D on a new line:", file=sys.stderr)
         code = sys.stdin.read()
         name = args.name or "pasted_code"
     else:
-        path = Path(args.file)
-        if args.apply and (path.is_symlink() or not path.is_file()):
-            print("--apply needs a regular file.", file=sys.stderr)
-            return 2
-        snapshot = path.read_bytes()
-        code = snapshot.decode("utf-8")
+        path = pathlib.Path(args.file)
+        code = path.read_text(encoding="utf-8")
         name = args.name or path.name
     if not code.strip():
         print("No code to review.")
@@ -131,28 +115,24 @@ def _check(args) -> int:
     llm = make_client(args.provider, args.model)
     result = review_snippet(ReviewAgent(llm), code, name)
     fixed = diff = notes = None
-    if args.fix or args.apply:
+    if args.fix:
         fixed, diff, notes = fix_code(llm, code, name, result)
 
     if args.format == "json":
         out = result.model_dump(mode="json")
-        if args.fix or args.apply:
+        if args.fix:
             out.update(fixed_code=fixed, diff=diff, fix_notes=notes)
         print(json.dumps(out, indent=2))
         return 0
 
     print(render_text(result))
-    if args.fix or args.apply:
+    if args.fix:
         print("\n" + "=" * 60 + "\nSuggested changes\n" + "=" * 60)
         print(diff or "No changes needed.")
         if notes:
             print(f"\n{notes}")
-        if args.apply and diff:
-            from .local_apply import approve_replacement
-
-            return approve_replacement(path, snapshot, fixed)
         if args.write and diff and args.file != "-":
-            src = Path(args.file)
+            src = pathlib.Path(args.file)
             target = src.with_name(f"{src.stem}.fixed{src.suffix}")
             target.write_text(fixed, encoding="utf-8")
             print(f"\nFixed code saved to {target} (your original file was not changed)")

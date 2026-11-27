@@ -1,42 +1,76 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light dark">
-  <title>Code review · DevPilot</title>
-  <link rel="stylesheet" href="/static/workspace.css">
-  <script defer src="/static/workspace.js"></script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DevPilot: paste code for review</title>
+<style>
+  :root { --bg:#fafaf8; --card:#fff; --text:#1f1f1d; --muted:#6b6a64; --border:#e2e0d8; --accent:#534ab7;
+          --crit:#a32d2d; --major:#854f0b; --minor:#185fa5; --add:#eaf3de; --del:#fcebeb; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1c1c1a; --card:#262624; --text:#ecebe4; --muted:#a3a198;
+          --border:#3a3936; --accent:#afa9ec; --crit:#f09595; --major:#ef9f27; --minor:#85b7eb; --add:#27500a; --del:#791f1f; } }
+  * { box-sizing:border-box } body { margin:0; font:15px/1.6 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:960px; margin:0 auto; padding:32px 20px 64px; }
+  h1 { font-size:22px; font-weight:600; margin:0 0 4px } p.sub { color:var(--muted); margin:0 0 20px }
+  textarea { width:100%; min-height:300px; font:13px/1.5 ui-monospace, Menlo, monospace; padding:12px; border:1px solid var(--border);
+             border-radius:8px; background:var(--card); color:var(--text); resize:vertical; }
+  .row { display:flex; gap:12px; align-items:center; margin:12px 0 24px; flex-wrap:wrap }
+  input[type=text] { padding:8px 10px; border:1px solid var(--border); border-radius:8px; background:var(--card); color:var(--text); }
+  button { padding:9px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; cursor:pointer }
+  button:disabled { opacity:.6; cursor:wait } label { color:var(--muted) }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px 18px; margin-bottom:12px }
+  .sev { font-weight:700; font-size:12px; letter-spacing:.04em; text-transform:uppercase }
+  .critical{color:var(--crit)} .major{color:var(--major)} .minor,.nit{color:var(--minor)}
+  pre { font:13px/1.5 ui-monospace, Menlo, monospace; white-space:pre-wrap; margin:8px 0 0; overflow-x:auto }
+  .diff span { display:block } .diff .a { background:var(--add) } .diff .d { background:var(--del) }
+  .muted { color:var(--muted); font-size:13px } .err { color:var(--crit) }
+</style>
 </head>
 <body>
-  <header><span class="mark" aria-hidden="true">dp</span><strong>DevPilot</strong><span class="divider">/</span> Code review<span id="provider" hidden></span></header>
-  <main>
-    <h1>Review workspace</h1>
-    <p class="intro">Review a source file, discuss the findings, and approve the changes you want to keep.</p>
-    <div class="workspace">
-      <section class="panel" aria-labelledby="source-heading">
-        <div class="heading"><h2 id="source-heading">Source file</h2><div class="fileTools"><button class="secondary" id="example">Try an example</button><button class="secondary" id="openFile">Open file</button></div><input type="file" id="file" hidden></div>
-        <label for="name">Filename</label><input id="name" type="text" placeholder="example.py" maxlength="255" autocomplete="off">
-        <label for="code">Source code</label><textarea id="code" placeholder="Paste your code here..." spellcheck="false" autocapitalize="off"></textarea>
-        <div class="actions"><button id="review">Review code</button><button id="download" class="secondary" hidden>Download fixed file</button></div>
-        <p id="status" class="status" role="status" aria-live="polite">Open a UTF-8 text file or paste up to 60,000 characters.</p>
-      </section>
-      <section class="panel" aria-labelledby="findings-heading">
-        <div class="heading"><h2 id="findings-heading">Review findings</h2><span id="count"></span></div>
-        <p id="summary">Findings will appear here after you review a file.</p>
-        <div id="findings"></div>
-        <button id="preview" hidden>Preview fixes</button>
-        <div id="diffBox" hidden>
-          <h3>Proposed changes</h3><p id="notes"></p><pre id="diff" tabindex="0" aria-label="Proposed code changes"></pre>
-          <div class="actions"><button id="approve">Approve and apply</button><button class="secondary" id="decline">Decline</button></div>
-        </div>
-      </section>
-    </div>
-    <section class="panel discussion" aria-labelledby="chat-heading">
-      <div class="heading"><h2 id="chat-heading">Review discussion</h2></div>
-      <div id="messages" role="log" aria-live="polite"><p id="chatHelp">Review a file to ask about a finding, a suggested fix, or a test case.</p></div>
-      <form id="chatForm"><label for="question" class="visually-hidden">Question about the review</label><input id="question" placeholder="Ask about this review…" maxlength="2000" disabled><button id="send" class="secondary" disabled>Send</button></form>
-      <p id="chatStatus" class="status" role="status"></p>
-    </section>
-  </main>
+<main>
+  <h1>DevPilot</h1>
+  <p class="sub">Paste any code. DevPilot reviews it like a senior engineer and can suggest a fixed version.</p>
+  <textarea id="code" placeholder="Paste your code here..." spellcheck="false"></textarea>
+  <div class="row">
+    <input id="name" type="text" placeholder="File name, e.g. app.py" size="24">
+    <label><input id="fix" type="checkbox" checked> Suggest fixed code</label>
+    <button id="go">Review code</button>
+    <span id="status" class="muted"></span>
+  </div>
+  <div id="out"></div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+$("go").onclick = async () => {
+  const code = $("code").value;
+  if (!code.trim()) { $("status").innerHTML = '<span class="err">Paste some code first.</span>'; return; }
+  $("go").disabled = true; $("status").textContent = "Reviewing... this can take up to a minute."; $("out").innerHTML = "";
+  try {
+    const r = await fetch("/check", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code, filename: $("name").value.trim() || "pasted_code", fix: $("fix").checked }) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || r.statusText);
+    let html = `<div class="card"><b>Summary</b><p>${esc(d.review.summary)}</p>
+      <div class="muted">${d.review.comments.length} issue(s) · ${d.review.dropped.length} filtered by verifier · ${d.review.tool_calls} tool calls</div></div>`;
+    for (const c of d.review.comments) {
+      html += `<div class="card"><span class="sev ${c.severity}">${esc(c.severity)}</span> · ${esc(c.category)} · line ${c.line}
+        <p>${esc(c.body)}</p>${c.suggestion ? `<b>Suggested fix</b><pre>${esc(c.suggestion)}</pre>` : ""}</div>`;
+    }
+    if (d.diff) {
+      const lines = d.diff.split("\n").map(l => `<span class="${l.startsWith("+") && !l.startsWith("+++") ? "a" : l.startsWith("-") && !l.startsWith("---") ? "d" : ""}">${esc(l) || " "}</span>`).join("");
+      html += `<div class="card"><b>Suggested changes</b>${d.fix_notes ? `<p class="muted">${esc(d.fix_notes)}</p>` : ""}<pre class="diff">${lines}</pre>
+        <p><button id="copy">Copy fixed code</button></p></div>`;
+    } else if ($("fix").checked) {
+      html += `<div class="card">No changes needed.</div>`;
+    }
+    $("out").innerHTML = html; $("status").textContent = "";
+    const copy = $("copy");
+    if (copy) copy.onclick = async () => { await navigator.clipboard.writeText(d.fixed_code); copy.textContent = "Copied"; };
+  } catch (e) {
+    $("status").innerHTML = `<span class="err">${esc(e.message)}</span>`;
+  } finally { $("go").disabled = false; }
+};
+</script>
 </body>
 </html>
